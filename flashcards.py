@@ -166,6 +166,9 @@ def cmd_start(db_path, session_name, round_cards):
     db = Database(db_path)
     with db as cur:
         session_id = cur.get_session_id(session_name)
+    if not session_id:
+        print(f'Failed to get record for session "{session_name}"')
+        return -1
 
     display = None
     ready   = []
@@ -179,8 +182,9 @@ def cmd_start(db_path, session_name, round_cards):
 
         if ready:
             current = ready.pop()
-            card_id, front, back, streak = current
-            display.update_question(front, len(done) + 1, len(ready) + len(done) + 1)
+            card_id, deck_name, front, back, streak = current
+            prefix = f'[{card_id}, {deck_name}] '
+            display.update_question(prefix + front, len(done) + 1, len(ready) + len(done) + 1)
         elif done:
             display.update_question('Continue? [Y/N]', 0, 0)
         else:
@@ -198,8 +202,8 @@ def cmd_start(db_path, session_name, round_cards):
             cur.increment_session_counter(session_id)
             review_cards = cur.get_review_cards(session_id, round_cards)
             new_cards = cur.get_new_cards(session_id, round_cards - len(review_cards))
-        ready += [(card_id, front, back, streak) for card_id, front, back, streak, _ in review_cards]
-        ready += [(card_id, front, back,      0) for card_id, front, back            in new_cards   ]
+        ready += [(card_id, deck_name, front, back, streak) for card_id, deck_name, front, back, streak in review_cards]
+        ready += [(card_id, deck_name, front, back,      0) for card_id, deck_name, front, back         in new_cards   ]
         shuffle(ready)
 
         next_question()
@@ -223,7 +227,7 @@ def cmd_start(db_path, session_name, round_cards):
     def on_submit(answer):
         nonlocal display, ready, current, done
         if current:
-            card_id, front, back, streak = current
+            card_id, deck_name, front, back, streak = current
             done.append((card_id, streak))
             result = RESULT_PASS if normalize(back) == normalize(answer) else RESULT_FAIL
             display.push_history(card_id, result, front, back, answer)

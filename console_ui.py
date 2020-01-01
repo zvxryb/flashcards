@@ -131,7 +131,7 @@ class HistoryForm:
 
     def update(self, data, highlight):
         self.update_result(data.result, highlight)
-        self.update_question(data.question)
+        self.update_question((f'{data.id}: ' + data.question) if data.question else '')
         self.update_expected(data.expected)
         self.update_answered(data.answered)
 

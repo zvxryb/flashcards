@@ -142,9 +142,19 @@ class Cursor:
 
     def get_new_cards(self, session, limit):
         self.cur.execute('''
-            SELECT cards.id, cards.front, cards.back FROM cards
-                WHERE deck_id IN (SELECT deck_id FROM session_decks WHERE session_id=:session)
-                AND NOT EXISTS (SELECT card_id FROM session_cards WHERE session_id=:session)
+            SELECT cards.id, decks.name, cards.front, cards.back
+                FROM cards
+                LEFT JOIN decks ON
+                    cards.deck_id == decks.id
+                WHERE EXISTS (
+                    SELECT 1 FROM session_decks
+                        WHERE session_decks.session_id=:session
+                        AND session_decks.deck_id=cards.deck_id
+                ) AND NOT EXISTS (
+                    SELECT 1 FROM session_cards
+                        WHERE session_cards.session_id=:session
+                        AND session_cards.card_id=cards.id
+                )
                 LIMIT :limit''',
             {'session': session, 'limit': limit})
         return self.cur.fetchall()
@@ -152,11 +162,14 @@ class Cursor:
     def get_review_cards(self, session, limit):
         counter = self.get_session_counter(session)
         self.cur.execute(
-            '''SELECT cards.id, cards.front, cards.back, session_cards.streak, session_cards.review_at
-                FROM session_cards INNER JOIN cards ON
+            '''SELECT cards.id, decks.name, cards.front, cards.back, session_cards.streak
+                FROM session_cards
+                INNER JOIN cards ON
                     session_cards.session_id = :session AND
                     session_cards.review_at <= :counter AND
                     session_cards.card_id = cards.id
+                LEFT JOIN decks ON
+                    cards.deck_id == decks.id
                 ORDER BY session_cards.review_at ASC
                 LIMIT :limit''',
             {'session': session, 'counter': counter, 'limit': limit})
