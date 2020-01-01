@@ -148,10 +148,11 @@ TOTAL_BOX    = (21, 6, 1,   2)
 ANSWER_BOX   = (27, 3, 1, 115)
 
 class HistoryData:
-    __slots__ = 'id', 'result', 'question', 'expected', 'answered'
+    __slots__ = 'id', 'modified', 'result', 'question', 'expected', 'answered'
 
     def __init__(self, id=None, result=None, question=None, expected=None, answered=None):
         self.id       = id
+        self.modified = False
         self.result   = result
         self.question = question
         self.expected = expected
@@ -227,12 +228,17 @@ class Display:
 
     def set_selected(self, selected):
         if self.selected is not None:
-            HISTORY_FORMS[self.selected].update_result(self.history[self.selected].result, False)
+            history_data = self.history[self.selected]
+            if history_data.modified:
+                history_data.modified = False
+                self.on_revise(history_data.id, history_data.result)
+            HISTORY_FORMS[self.selected].update_result(history_data.result, False)
 
         self.selected = selected
 
         if self.selected is not None:
-            HISTORY_FORMS[self.selected].update_result(self.history[self.selected].result, True)
+            history_data = self.history[self.selected]
+            HISTORY_FORMS[self.selected].update_result(history_data.result, True)
 
     def select_item(self, up):
         n = len(HISTORY_FORMS)
@@ -251,6 +257,19 @@ class Display:
             else:
                 self.set_selected(None)
 
+    def toggle_item(self):
+        if self.selected is None:
+            return
+        history_data = self.history[self.selected]
+        if history_data.result is None:
+            return
+        if history_data.result == RESULT_PASS:
+            history_data.result = RESULT_FAIL
+        else:
+            history_data.result = RESULT_PASS
+        history_data.modified = True
+        HISTORY_FORMS[self.selected].update_result(history_data.result, True)
+
     def main(self):
         while True:
             char = msvcrt.getwch()
@@ -258,8 +277,7 @@ class Display:
                 if self.selected is None:
                     return 0
                 else:
-                    HISTORY_FORMS[self.selected].update_result(self.history[self.selected].result, False)
-                    self.selected = None
+                    self.set_selected(None)
             elif char == '\x03' or char == '\x04':
                 return 0
             elif char == '\n':
@@ -275,20 +293,20 @@ class Display:
                 self.backspace()
             elif char == MS_KEY_ESC0 or char == MS_KEY_ESC1:
                 char2 = msvcrt.getwch()
-                if char2 == MS_KEY_UP:
-                    self.select_item(True)
-                elif char2 == MS_KEY_DOWN:
-                    self.select_item(False)
-                elif char2 == MS_KEY_LEFT:
+                if char2 == MS_KEY_UP or char2 == MS_KEY_DOWN:
+                    self.select_item(char2 == MS_KEY_UP)
+                elif char2 == MS_KEY_LEFT or char2 == MS_KEY_RIGHT:
                     if self.selected is None:
-                        if self.cursor > 0:
-                            self.cursor -= 1
-                            sys.stdout.write(ANSI_BACK * self.cursor_char_width())
-                elif char2 == MS_KEY_RIGHT:
-                    if self.selected is None:
-                        if self.cursor < len(self.input):
-                            sys.stdout.write(ANSI_FORWARD * self.cursor_char_width())
-                            self.cursor += 1
+                        if char2 == MS_KEY_LEFT:
+                            if self.cursor > 0:
+                                self.cursor -= 1
+                                sys.stdout.write(ANSI_BACK * self.cursor_char_width())
+                        else:
+                            if self.cursor < len(self.input):
+                                sys.stdout.write(ANSI_FORWARD * self.cursor_char_width())
+                                self.cursor += 1
+                    else:
+                        self.toggle_item()
                 elif char2 == MS_KEY_HOME:
                     if self.selected is None:
                         self.cursor = 0
@@ -304,6 +322,9 @@ class Display:
                     self.input += char
                 self.cursor += 1
                 sys.stdout.write(char + ANSI_SAVE + self.input[self.cursor:] + ANSI_RESTORE)
+            elif char == ' ':
+                self.toggle_item()
+                self.set_selected(None)
             sys.stdout.flush()
 
 if __name__ == '__main__':
