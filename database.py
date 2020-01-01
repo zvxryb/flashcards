@@ -101,6 +101,16 @@ class Cursor:
         self.cur.execute('INSERT INTO decks (name) VALUES (?)', (name,))
         return self.cur.lastrowid
 
+    def get_card(self, card_id):
+        self.cur.execute('SELECT * FROM cards WHERE id == ?', (card_id,))
+        return self.cur.fetchone()
+
+    def update_card(self, card_id, front, back):
+        self.cur.execute(
+            'UPDATE cards SET front=:front, back=:back WHERE id=:card_id',
+            {'card_id': card_id, 'front': front, 'back': back})
+        return self.cur.fetchone()
+
     def add_cards(self, deck, cards):
         self.cur.executemany(
             'INSERT INTO cards (deck_id, front, back) VALUES (?, ?, ?)',
