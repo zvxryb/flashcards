@@ -105,6 +105,7 @@ def cmd_modify(db_path, item_type, item_id):
         print(f'Updated card {item_id}:')
         print(f'\t"{front}" => "{new_front}"')
         print(f'\t"{back}" => "{new_back}"')
+    return 0
 
 def cmd_create(db_path, item_type):
     db = Database(db_path)
@@ -141,6 +142,10 @@ def cmd_create(db_path, item_type):
         else:
             with db as cur:
                 deck_id = cur.get_deck_id(name)
+                if deck_id is None:
+                    sys.stderr.write('failed to get deck ID')
+                    sys.stderr.flush()
+                    return -1
 
         while True:
             front = input('Card front: ')
@@ -155,6 +160,7 @@ def cmd_create(db_path, item_type):
                 cur.add_cards(deck_id, ((front, back),))
 
             print(f'Added card "{front}", "{back}"')
+    return 0
 
 def cmd_delete(db_path, item_type, item_id):
     db = Database(db_path)
@@ -163,6 +169,7 @@ def cmd_delete(db_path, item_type, item_id):
         with db as cur:
             cur.delete_card(item_id)
         print(f'Updated card {item_id}')
+    return 0
 
 def cmd_import(db_path, deck_name, in_path, format):
     with open(in_path, 'r', encoding='utf-8') as f:
@@ -176,12 +183,17 @@ def cmd_import(db_path, deck_name, in_path, format):
     with db as cur:
         deck_id = cur.create_deck(deck_name)
         cur.add_cards(deck_id, cards)
+    return 0
 
 def cmd_export(db_path, deck_name, out_path, format):
     db = Database(db_path)
 
     with db as cur:
         deck_id = cur.get_deck_id(deck_name)
+        if deck_id is None:
+            sys.stderr.write('failed to get deck ID')
+            sys.stderr.flush()
+            return -1
         cards = [(front, back) for _, _, front, back in cur.list_cards(deck=deck_id)]
 
     with open(out_path, 'w', encoding='utf-8') as f:
@@ -191,6 +203,7 @@ def cmd_export(db_path, deck_name, out_path, format):
             writer = csv.DictWriter(f, ('front', 'back'))
             writer.writeheader()
             writer.writerows({'front': front, 'back': back} for front, back in cards)
+    return 0
 
 def cmd_start(db_path, session_name, round_cards):
     db = Database(db_path)
