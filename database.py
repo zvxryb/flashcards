@@ -118,6 +118,12 @@ class Cursor:
         if self.cur.rowcount != len(cards):
             raise Exception('failed to create card')
 
+    def delete_card(self, card_id):
+        self.cur.execute('DELETE FROM session_cards WHERE card_id=?', (card_id,))
+        self.cur.execute('DELETE FROM cards WHERE id=?', (card_id,))
+        if self.cur.rowcount != 1:
+            raise Exception('failed to delete card')
+
     def get_session_id(self, name):
         self.cur.execute('SELECT id FROM sessions WHERE name=?', (name,))
         session = self.cur.fetchone()
@@ -139,6 +145,41 @@ class Cursor:
             [(session, deck) for deck in decks])
         if self.cur.rowcount != len(decks):
             raise Exception('failed to add decks to session')
+
+    def get_session_decks(self, session_id):
+        self.cur.execute(
+            'SELECT session_decks.deck_id FROM session_decks WHERE session_id=?',
+            (session_id,))
+        rows = self.cur.fetchall()
+        if not rows:
+            raise Exception('failed to get session decks')
+        return [row[0] for row in rows]
+
+    def cleanup_session_cards(self, session_id):
+        self.cur.execute(
+            '''DELETE FROM session_cards
+                WHERE session_id=?
+                AND NOT EXISTS (
+                    SELECT 1
+                        FROM cards
+                        INNER JOIN session_decks ON
+                            session_cards.card_id = cards.id AND
+                            session_decks.deck_id = cards.deck_id AND
+                            session_decks.session_id = session_cards.session_id
+                )''',
+            (session_id,))
+        if self.cur.rowcount < 0:
+            raise Exception('failed to cleanup session card info')
+
+    def update_session_decks(self, session_id, deck_ids):
+        self.cur.execute(
+            'DELETE FROM session_decks WHERE session_id=?',
+            (session_id,))
+        if self.cur.rowcount < 0:
+            raise Exception('failed to remove decks from session')
+
+        self.add_session_decks(session_id, deck_ids)
+        self.cleanup_session_cards(session_id)
 
     def get_new_cards(self, session, limit):
         self.cur.execute('''

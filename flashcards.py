@@ -73,7 +73,29 @@ def cmd_list(db_path, list_type, session_name, deck_name):
 def cmd_modify(db_path, item_type, item_id):
     db = Database(db_path)
 
-    if item_type == 'card':
+    if item_type == 'session':
+        with db as cur:
+            all_decks = cur.list_decks()
+            old_decks = cur.get_session_decks(item_id)
+        print_table((('id', 5), ('name', 80)), all_decks)
+        old_decks = ",".join([str(deck_id) for deck_id in old_decks])
+
+        while True:
+            new_decks = input(f'Deck IDs (comma-delimited, i.e. "1, 2") [{old_decks}]: ').split(',')
+            if not new_decks:
+                break
+            try:
+                new_decks = [int(deck_id.strip()) for deck_id in new_decks]
+            except ValueError:
+                print('failed to parse deck IDs')
+            else:
+                break
+
+        if new_decks:
+            with db as cur:
+                cur.update_session_decks(item_id, new_decks)
+
+    elif item_type == 'card':
         with db as cur:
             _, _, front, back = cur.get_card(item_id)
         new_front = input(f'Front [{front}]: ') or front
@@ -133,6 +155,14 @@ def cmd_create(db_path, item_type):
                 cur.add_cards(deck_id, ((front, back),))
 
             print(f'Added card "{front}", "{back}"')
+
+def cmd_delete(db_path, item_type, item_id):
+    db = Database(db_path)
+
+    if item_type == 'card':
+        with db as cur:
+            cur.delete_card(item_id)
+        print(f'Updated card {item_id}')
 
 def cmd_import(db_path, deck_name, in_path, format):
     with open(in_path, 'r', encoding='utf-8') as f:
@@ -258,6 +288,7 @@ def main(argv):
     list_args   = commands.add_parser('list'  , help='list items')
     modify_args = commands.add_parser('modify', help='edit an item')
     create_args = commands.add_parser('create', help='create items')
+    delete_args = commands.add_parser('delete', help='delete items')
     import_args = commands.add_parser('import', help='import a deck')
     export_args = commands.add_parser('export', help='export a deck')
     start_args  = commands.add_parser('start' , help='start a session')
@@ -266,12 +297,15 @@ def main(argv):
     list_args.add_argument('--in-session')
     list_args.add_argument('--in-deck')
 
-    modify_args.add_argument('type', choices=('card'))
+    modify_args.add_argument('type', choices=('card', 'session'))
     modify_args.add_argument('--id', required=True, type=int)
     modify_args.add_argument('--front')
     modify_args.add_argument('--back')
 
     create_args.add_argument('type', choices=('session', 'deck', 'cards'))
+
+    delete_args.add_argument('type', choices=('card',))
+    delete_args.add_argument('--id', required=True, type=int)
 
     import_args.add_argument('deck')
     import_args.add_argument('path')
@@ -290,6 +324,8 @@ def main(argv):
         return cmd_modify(args.db, args.type, args.id)
     elif args.cmd == 'create':
         return cmd_create(args.db, args.type)
+    elif args.cmd == 'delete':
+        return cmd_delete(args.db, args.type, args.id)
     elif args.cmd == 'import':
         return cmd_import(args.db, args.deck, args.path, args.format)
     elif args.cmd == 'export':
