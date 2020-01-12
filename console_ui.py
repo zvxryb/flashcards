@@ -13,11 +13,11 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import codecs, ctypes, msvcrt, sys
+import codecs, ctypes, msvcrt, re, sys, unicodedata
 from ctypes.wintypes import DWORD
 from textwrap import TextWrapper
 
-from util import char_width, unicode_width, unicode_ljust, unicode_center
+from util import char_width, unicode_width, unicode_ljust, unicode_center, line_break_opportunities
 
 STD_OUTPUT_HANDLE = -11
 ENABLE_VIRTUAL_TERMINAL_PROCESSING = 4
@@ -71,63 +71,196 @@ MS_KEY_END   = '\x4f'
 RESULT_PASS = 0
 RESULT_FAIL = 1
 
-def redraw_box(text, row, col, rows, cols, center_h, center_v, style=None):
-    out = ANSI_SAVE
+class Formatter:
+    __slots__ = (
+        '__row',
+        '__col',
+        '__rows',
+        '__cols',
+        '__center_h',
+        '__center_v',
+        '__style',
+        '__text',
+        '__modified',
+        '__lines')
 
-    if style:
-        out += style
+    def __init__(self, row, col, rows, cols, center_h, center_v, style=None):
+        self.__row = row
+        self.__col = col
+        self.__rows = rows
+        self.__cols = cols
+        self.__center_h = center_h
+        self.__center_v = center_v
+        self.__style = style
+        self.text = ''
 
-    wrapper = TextWrapper(width=cols, max_lines=rows, placeholder='...')
-    lines = [line for group in (text or '').splitlines() for line in wrapper.wrap(group)]
-    for i in range(rows):
-        out += ansi_pos(row + i, col)
+    @property
+    def text(self):
+        return self.__text
 
-        n = len(lines)
-        j = i - (rows - n)//2 if center_v else i
-        line = lines[j] if j >= 0 and j < n else ''
-        if center_v:
-            out += unicode_center(line, cols)
+    @text.setter
+    def text(self, text):
+        self.__text = text or ''
+        self.__modified = True
+
+    @property
+    def style(self):
+        return self.__style
+
+    @style.setter
+    def style(self, style):
+        self.__style = style
+
+    @property
+    def lines(self):
+        if not self.__modified:
+            return self.__lines
+
+        self.__modified = False
+        self.__lines = []
+
+        line_start = 0
+        line_end   = 0
+        line_break = 0
+        line_width = 0
+
+        maybe_break_after = line_break_opportunities(self.__text)
+        while line_start < len(self.__text):
+            line_end = line_start + 1
+            while line_end < len(self.__text):
+                c0 = self.__text[line_end-1]
+                c1 = self.__text[line_end]
+                if c0 in ('\u000a', '\u000b', '\u000c', '\u0085', '\u2028', '\u2029'):
+                    break
+                if c0 == '\u000d' and c1 != '\u000a':
+                    break
+
+                if maybe_break_after[line_end-1]:
+                    line_break = line_end
+
+                w = char_width(c0)
+                if line_width + w >= self.__cols:
+                    if line_break > line_start:
+                        line_end = line_break
+                    break
+
+                line_end += 1
+                line_width += w
+
+            self.__lines.append((line_start, line_end, unicode_width(self.__text[line_start:line_end])))
+            line_start = line_end
+            line_width = 0
+
+        return self.__lines
+
+    def local_cursor_pos(self, index):
+        line, char, line_cols = 0, 0, 0
+        for i, (start, end, width) in enumerate(self.lines):
+            line = i
+            line_cols = width
+            if index <= end:
+                char = unicode_width(self.__text[start : index])
+                break
+            char = width
+        return line, char, line_cols
+
+    def global_cursor_pos(self, index):
+        n = len(self.lines)
+        row, col, m = self.local_cursor_pos(index)
+
+        row_offset = 0
+        if self.__center_v and self.__rows > n:
+            row_offset = (self.__rows - n)//2
+
+        out_row = row + row_offset
+        if out_row < 0:
+            out_row = 0
+            out_col = 0
+        elif out_row >= self.__rows:
+            out_row = self.__rows
+            out_col = self.__cols
+        elif self.__center_h:
+            out_col = col + (self.__cols - m)//2
         else:
-            out += unicode_ljust(line, cols)
+            out_col = col
 
-    out += ANSI_RESET + ANSI_RESTORE
-    sys.stdout.write(out)
+        out_row += self.__row
+        out_col += self.__col
+
+        return out_row, out_col
+
+    def redraw(self):
+        out = ANSI_SAVE
+
+        if self.style:
+            out += self.style
+
+        n = len(self.lines)
+
+        row_offset = 0
+        if self.__center_v and self.__rows > n:
+            row_offset = (self.__rows - n)//2
+
+        for i in range(self.__rows):
+            out += ansi_pos(self.__row + i, self.__col)
+
+            j = i - row_offset
+            if j < 0 or j >= n:
+                out += ' ' * self.__cols
+                continue
+
+            start, end, width = self.lines[j]
+
+            if self.__center_h:
+                lpad = (self.__cols - width) // 2
+            else:
+                lpad = 0
+            rpad = self.__cols - lpad - width
+
+            line = ' '*lpad + self.__text[start:end] + ' '*rpad
+            if i == self.__rows - 1 and i < n - 1:
+                line = line[:-3] + '...'
+            out += line
+
+        out += ANSI_RESET + ANSI_RESTORE
+        sys.stdout.write(out)
 
 class HistoryForm:
     __slots__ = 'result', 'question', 'expected', 'answered'
 
     def __init__(self, result, question, expected, answered):
-        self.result   = result
-        self.question = question
-        self.expected = expected
-        self.answered = answered
+        self.result   = Formatter(*result  , True , True )
+        self.question = Formatter(*question, False, False)
+        self.expected = Formatter(*expected, False, False)
+        self.answered = Formatter(*answered, False, False)
 
     def update_result(self, result, highlight):
-        row, col, rows, cols = self.result
-
         if result is None:
-            style = ''
-            text  = ''
+            self.result.style = ''
+            self.result.text  = ''
         elif result == RESULT_PASS:
-            style = ANSI_GREEN
-            text  = u'\u2713\nRight'
+            self.result.style = ANSI_GREEN
+            self.result.text  = u'\u2713 Right'
         elif result == RESULT_FAIL:
-            style = ANSI_RED
-            text  = u'\u2717\nWrong'
+            self.result.style = ANSI_RED
+            self.result.text  = u'\u2717 Wrong'
 
         if highlight:
-            style += ANSI_REVERSE
+            self.result.style += ANSI_REVERSE
 
-        redraw_box(text, row, col, rows, cols, True, True, style)
+        self.result.redraw()
 
     def update_question(self, text):
-        redraw_box(text, *self.question, False, False)
+        self.question.text = text
+        self.question.redraw()
 
     def update_expected(self, text):
-        redraw_box(text, *self.expected, False, False)
+        self.expected.text = text
+        self.expected.redraw()
 
     def update_answered(self, text):
-        redraw_box(text, *self.answered, False, False)
+        self.answered.text = text
+        self.answered.redraw()
 
     def update(self, data, highlight):
         self.update_result(data.result, highlight)
@@ -136,16 +269,14 @@ class HistoryForm:
         self.update_answered(data.answered)
 
 HISTORY_FORMS = (
-    HistoryForm((18, 3, 3, 5), (18, 22, 1, 96), (19, 22, 1, 96), (20, 22, 1, 96)),
-    HistoryForm((14, 3, 3, 5), (14, 22, 1, 96), (15, 22, 1, 96), (16, 22, 1, 96)),
-    HistoryForm((10, 3, 3, 5), (10, 22, 1, 96), (11, 22, 1, 96), (12, 22, 1, 96)),
-    HistoryForm(( 6, 3, 3, 5), ( 6, 22, 1, 96), ( 7, 22, 1, 96), ( 8, 22, 1, 96)),
-    HistoryForm(( 2, 3, 3, 5), ( 2, 22, 1, 96), ( 3, 22, 1, 96), ( 4, 22, 1, 96)))
+    HistoryForm(( 21, 3, 1, 9), (16, 14, 2, 104), (18, 14, 2, 104), (20, 14, 2, 104)),
+    HistoryForm(( 14, 3, 1, 9), ( 9, 14, 2, 104), (11, 14, 2, 104), (13, 14, 2, 104)),
+    HistoryForm((  7, 3, 1, 9), ( 2, 14, 2, 104), ( 4, 14, 2, 104), ( 6, 14, 2, 104)))
 
-QUESTION_BOX = (23, 3, 2, 115)
-NUMBER_BOX   = (21, 3, 1,   2)
-TOTAL_BOX    = (21, 6, 1,   2)
-ANSWER_BOX   = (27, 3, 1, 115)
+QUESTION_BOX = (23, 3, 3, 115)
+NUMBER_BOX   = (22, 3, 1,   2)
+TOTAL_BOX    = (22, 6, 1,   2)
+ANSWER_BOX   = (27, 3, 2, 115)
 
 class HistoryData:
     __slots__ = 'id', 'modified', 'result', 'question', 'expected', 'answered'
@@ -163,6 +294,8 @@ class Display:
         self.input     = u''
         self.cursor    = 0
         self.history   = [HistoryData() for _ in HISTORY_FORMS]
+        self.question_formatter = Formatter(*QUESTION_BOX, True , True )
+        self.answer_formatter   = Formatter(*ANSWER_BOX  , False, False)
         self.selected  = None
         self.on_submit = on_submit
         self.on_revise = on_revise
@@ -176,21 +309,8 @@ class Display:
         sys.stdout.flush()
 
     def __del__(self):
-        sys.stdout.write(ansi_col(0) + ANSI_DOWN * 2)
+        sys.stdout.write(ansi_col(0) + ANSI_DOWN * 3)
         sys.stdout.flush()
-
-    def cursor_col(self):
-        return unicode_width(self.input[:self.cursor])
-
-    def cursor_char_width(self):
-        return char_width(self.input[self.cursor])
-
-    def backspace(self):
-        if self.cursor > 0:
-            self.cursor -= 1
-            n = self.cursor_char_width()
-            sys.stdout.write(ANSI_BACK * n + ANSI_SAVE + self.input[self.cursor + 1:] + ' ' * n + ANSI_RESTORE)
-            self.input = self.input[:self.cursor] + self.input[self.cursor + 1:]
 
     def redraw_history(self):
         for i, (form, data) in enumerate(zip(HISTORY_FORMS, self.history)):
@@ -224,7 +344,8 @@ class Display:
             ansi_pos(TOTAL_BOX [0], TOTAL_BOX [1]) + total  +
             ANSI_RESTORE)
 
-        redraw_box(question, *QUESTION_BOX, True, True)
+        self.question_formatter.text = question
+        self.question_formatter.redraw()
 
     def set_selected(self, selected):
         if self.selected is not None:
@@ -270,6 +391,15 @@ class Display:
         history_data.modified = True
         HISTORY_FORMS[self.selected].update_result(history_data.result, True)
 
+    def update_cursor(self):
+        self.answer_formatter.text = self.input
+        row, col = self.answer_formatter.global_cursor_pos(self.cursor)
+        sys.stdout.write(ansi_pos(row, col))
+
+    def redraw_input(self):
+        self.answer_formatter.text = self.input
+        self.answer_formatter.redraw()
+
     def main(self):
         while True:
             char = msvcrt.getwch()
@@ -288,9 +418,14 @@ class Display:
                         return 0
                     self.input = ''
                     self.cursor = 0
-                    sys.stdout.write(ansi_col(ANSWER_BOX[1]) + ANSI_SAVE + ' ' * ANSWER_BOX[3] + ANSI_RESTORE)
+                    self.update_cursor()
+                    self.redraw_input()
             elif char == ASCII_BACKSPACE:
-                self.backspace()
+                if self.cursor > 0:
+                    self.cursor -= 1
+                    self.input = self.input[:self.cursor] + self.input[self.cursor + 1:]
+                    self.update_cursor()
+                    self.redraw_input()
             elif char == MS_KEY_ESC0 or char == MS_KEY_ESC1:
                 char2 = msvcrt.getwch()
                 if char2 == MS_KEY_UP or char2 == MS_KEY_DOWN:
@@ -300,28 +435,29 @@ class Display:
                         if char2 == MS_KEY_LEFT:
                             if self.cursor > 0:
                                 self.cursor -= 1
-                                sys.stdout.write(ANSI_BACK * self.cursor_char_width())
+                                self.update_cursor()
                         else:
                             if self.cursor < len(self.input):
-                                sys.stdout.write(ANSI_FORWARD * self.cursor_char_width())
                                 self.cursor += 1
+                                self.update_cursor()
                     else:
                         self.toggle_item()
                 elif char2 == MS_KEY_HOME:
                     if self.selected is None:
                         self.cursor = 0
-                        sys.stdout.write(ansi_col(ANSWER_BOX[1] + self.cursor_col()))
+                        self.update_cursor()
                 elif char2 == MS_KEY_END:
                     if self.selected is None:
                         self.cursor = len(self.input)
-                        sys.stdout.write(ansi_col(ANSWER_BOX[1] + self.cursor_col()))
+                        self.update_cursor()
             elif self.selected is None:
                 if self.cursor < len(self.input):
                     self.input = self.input[:self.cursor] + char + self.input[self.cursor:]
                 else:
                     self.input += char
                 self.cursor += 1
-                sys.stdout.write(char + ANSI_SAVE + self.input[self.cursor:] + ANSI_RESTORE)
+                self.update_cursor()
+                self.redraw_input()
             elif char == ' ':
                 self.toggle_item()
                 self.set_selected(None)
