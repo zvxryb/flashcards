@@ -32,6 +32,8 @@ Start practicing:
 
 ## Notes
 
+If the UI displays incorrectly, ensure your terminal is appropriately sized _before_ launching the script.  The UI is statically sized at 119x29, but may require an extra column or row.
+
 Only supports Windows, for now.
 
-Unicode should mostly work.  [Windows Terminal](https://github.com/microsoft/terminal) is recommended for display of unicode characters.
+Unicode should mostly work, but language-specific formatting rules are not implemented for every language.  [Windows Terminal](https://github.com/microsoft/terminal) is recommended for display of unicode characters.
