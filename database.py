@@ -221,9 +221,12 @@ class Cursor:
 
     def update_session_card(self, session, card, streak, review_at):
         self.cur.execute('''
-            INSERT OR REPLACE INTO session_cards
+            INSERT INTO session_cards
                 (session_id, card_id, streak, review_at)
-                VALUES (?, ?, ?, ?)''',
+                VALUES (:session_id, :card_id, :streak, :review_at)
+                ON CONFLICT(session_id, card_id) DO UPDATE SET
+                    streak=:streak,
+                    review_at=coalesce(:review_at, review_at)''',
             (session, card, streak, review_at))
         if self.cur.rowcount != 1:
             raise Exception('failed to update session card info')

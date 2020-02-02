@@ -264,7 +264,7 @@ def cmd_start(db_path, session_name, round_cards):
                 review_at = counter + 2**streak
             else:
                 streak = 0
-                review_at = 0
+                review_at = None
             cur.update_session_card(session_id, card_id, streak, review_at)
 
     def on_submit(answer):
