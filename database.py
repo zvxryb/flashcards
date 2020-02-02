@@ -227,7 +227,7 @@ class Cursor:
                 ON CONFLICT(session_id, card_id) DO UPDATE SET
                     streak=:streak,
                     review_at=coalesce(:review_at, review_at)''',
-            (session, card, streak, review_at))
+            {'session_id': session, 'card_id': card, 'streak': streak, 'review_at': review_at})
         if self.cur.rowcount != 1:
             raise Exception('failed to update session card info')
 
