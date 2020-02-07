@@ -39,7 +39,7 @@ def print_table(cols, rows):
             print('║ ' + ' │ '.join([unicode_ljust(s, width) for s, (_, _, width) in zip(line, cols)]) + ' ║')
     print('╚═' + '═╧═'.join(['═' * width for _, _, width in cols]) + '═╝')
 
-def cmd_list(db_path, list_type, session_name, deck_name):
+def cmd_list(db_path, list_type, session_name, deck_name, contains_text):
     with Database(db_path) as cur:
         if list_type == 'sessions':
             if session_name:
@@ -63,8 +63,9 @@ def cmd_list(db_path, list_type, session_name, deck_name):
         elif list_type == 'cards':
             cols = ('id', 5), ('deck_id', 7), ('front', 40), ('back', 40)
             rows = cur.list_cards(
-                session=(cur.get_session_id(session_name) if session_name else None),
-                deck   =(cur.get_deck_id   (deck_name   ) if deck_name    else None))
+                session_id=(cur.get_session_id(session_name) if session_name else None),
+                deck_id   =(cur.get_deck_id   (deck_name   ) if deck_name    else None),
+                contains_text=contains_text)
         else:
             return -1
     print_table(cols, rows)
@@ -142,10 +143,6 @@ def cmd_create(db_path, item_type):
         else:
             with db as cur:
                 deck_id = cur.get_deck_id(name)
-                if deck_id is None:
-                    sys.stderr.write('failed to get deck ID')
-                    sys.stderr.flush()
-                    return -1
 
         while True:
             front = input('Card front: ')
@@ -190,11 +187,7 @@ def cmd_export(db_path, deck_name, out_path, format):
 
     with db as cur:
         deck_id = cur.get_deck_id(deck_name)
-        if deck_id is None:
-            sys.stderr.write('failed to get deck ID')
-            sys.stderr.flush()
-            return -1
-        cards = [(front, back) for _, _, front, back in cur.list_cards(deck=deck_id)]
+        cards = [(front, back) for _, _, front, back in cur.list_cards(deck_id=deck_id)]
 
     with open(out_path, 'w', encoding='utf-8') as f:
         if format == 'json':
@@ -209,9 +202,6 @@ def cmd_start(db_path, session_name, round_cards):
     db = Database(db_path)
     with db as cur:
         session_id = cur.get_session_id(session_name)
-    if not session_id:
-        print(f'Failed to get record for session "{session_name}"')
-        return -1
 
     display = None
     ready   = []
@@ -309,6 +299,7 @@ def main(argv):
     list_args.add_argument('type', choices=('sessions', 'decks', 'cards'))
     list_args.add_argument('--in-session')
     list_args.add_argument('--in-deck')
+    list_args.add_argument('--contains-text')
 
     modify_args.add_argument('type', choices=('card', 'session'))
     modify_args.add_argument('--id', required=True, type=int)
@@ -332,7 +323,7 @@ def main(argv):
 
     args = parse.parse_args(args=argv[1:])
     if args.cmd == 'list':
-        return cmd_list(args.db, args.type, args.in_session, args.in_deck)
+        return cmd_list(args.db, args.type, args.in_session, args.in_deck, args.contains_text)
     if args.cmd == 'modify':
         return cmd_modify(args.db, args.type, args.id)
     elif args.cmd == 'create':

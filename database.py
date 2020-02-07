@@ -77,25 +77,30 @@ class Cursor:
             self.cur.execute('SELECT * FROM decks')
         return self.cur.fetchall()
 
-    def list_cards(self, session=None, deck=None):
-        args = {'session': session, 'deck': deck}
+    def list_cards(self, session_id=None, deck_id=None, contains_text=None):
         query = 'SELECT * FROM cards'
-        if session is not None:
-            if deck is not None:
-                query = '''SELECT * FROM cards WHERE deck_id=:deck AND id IN
-                    (SELECT card_id FROM session_cards WHERE session_id=:session)'''
-            else:
-                query = '''SELECT * FROM cards WHERE id IN
-                    (SELECT card_id FROM session_cards WHERE session_id=:session)'''
-        elif deck is not None:
-            query = '''SELECT * FROM cards WHERE deck_id=:deck'''
+        where = []
+        args = {}
+        if session_id is not None:
+            where += ['(id IN (SELECT card_id FROM session_cards WHERE session_id=:session_id))']
+            args = {**args, 'session_id': session_id}
+        if deck_id is not None:
+            where += ['(deck_id=:deck_id)']
+            args = {**args, 'deck_id': deck_id}
+        if contains_text is not None:
+            where += ['(front LIKE :contains_text OR back LIKE :contains_text)']
+            args = {**args, 'contains_text': '%'+contains_text+'%'}
+        if where:
+            query += ' WHERE ' + ' AND '.join(where)
         self.cur.execute(query, args)
         return self.cur.fetchall()
 
     def get_deck_id(self, name):
         self.cur.execute('SELECT id FROM decks WHERE name=?', (name,))
-        session = self.cur.fetchone()
-        return session[0] if session else None
+        deck = self.cur.fetchone()
+        if not deck:
+            raise Exception(f'no deck named {name} exists')
+        return deck[0]
 
     def create_deck(self, name):
         self.cur.execute('INSERT INTO decks (name) VALUES (?)', (name,))
@@ -127,7 +132,9 @@ class Cursor:
     def get_session_id(self, name):
         self.cur.execute('SELECT id FROM sessions WHERE name=?', (name,))
         session = self.cur.fetchone()
-        return session[0] if session else None
+        if not session:
+            raise Exception(f'no session named {name} exists')
+        return session[0]
 
     def create_session(self, name):
         self.cur.execute('INSERT INTO sessions (name, counter) VALUES (?, ?)', (name, 0))
