@@ -75,7 +75,7 @@ def normalize(tokens: Iterator[Token]) -> Generator[Token, None, None]:
             if t0:
                 if t0.type == Token.SPACE:
                     t0.type = Token.LITERAL
-                    yield Token(Token.SPACE, None, '\N{ZWSP}')
+                    yield Token(Token.SPACE, None, '')
                 yield t0
             t0 = t1
         elif t1.value == '{':
@@ -83,12 +83,15 @@ def normalize(tokens: Iterator[Token]) -> Generator[Token, None, None]:
             if t0:
                 yield t0
                 if t0.type in (Token.LITERAL, Token.RBRACKET):
-                    yield Token(Token.SPACE, None, '\N{ZWSP}')
+                    yield Token(Token.SPACE, None, '')
             t0 = t1
         elif t1.value == '}':
             t1.type = Token.RBRACKET
             if t0:
                 yield t0
+                if t0.type == Token.LBRACKET:
+                    assert t0.value == '{'
+                    yield Token(Token.LITERAL, None, '')
             t0 = t1
         elif all(is_breaking_space(c) for c in t1.value):
             if t0 and t0.type == Token.SPACE:
@@ -106,7 +109,7 @@ def normalize(tokens: Iterator[Token]) -> Generator[Token, None, None]:
             if t0:
                 yield t0
                 if t0.type in (Token.LITERAL, Token.RBRACKET):
-                    yield Token(Token.SPACE, None, '\N{ZWSP}')
+                    yield Token(Token.SPACE, None, '')
             t0 = t1
 
     if t0:
@@ -315,7 +318,6 @@ def layout(tokens: Iterator[Token]) -> Tuple[List[Tuple[str, Optional[Tuple[int,
             assert token.value == '{'
             operators += [(0, token)]
         elif token.type == Token.RBRACKET:
-            assert token.value == '}'
             while True:
                 try:
                     _, token_ = operators.pop()
@@ -358,7 +360,7 @@ def layout(tokens: Iterator[Token]) -> Tuple[List[Tuple[str, Optional[Tuple[int,
     return quirks, reduce(lambda output, item: output.concat(item), output, TextGroup.empty())
 
 with WinAnsiMode():
-    log_handler = logging.StreamHandler()
+    log_handler = logging.FileHandler('markup.log', encoding='utf-8')
     log_handler.setLevel(logging.DEBUG)
     LOG.setLevel(logging.DEBUG)
     LOG.addHandler(log_handler)
@@ -368,9 +370,7 @@ with WinAnsiMode():
     except NameError:
         pass
 
-    tokens = [*normalize(tokenize(input('> ')))]
-    print([(str(token.type), token.value) for token in tokens])
-    quirks, group = layout(token for token in tokens)
+    quirks, group = layout(normalize(tokenize(input('> '))))
 
     sys.stdout.write(ANSI_SAVE + ANSI_CLEAR)
     for item in group.items:
