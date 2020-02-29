@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import abc, inspect, logging, sys, threading, unicodedata
+import logging, sys, threading, unicodedata
 from functools import reduce
 from typing import Any, Callable, Dict, Generator, Iterator, List, Optional, Tuple, Union
 
@@ -13,7 +13,7 @@ LOG = logging.getLogger(__name__)
 def token_boundaries(s: str) -> StringMask:
     cats = [unicodedata.category(c) for c in s]
     delim = StringMask.collect(
-        c in ('\\', '{', '}', '`', '^', '_') or
+        c in ('\\', '(', '{', '}', '`', '^', '_') or
         is_breaking_space(c, cat) or
         is_inner_punctuation(cat) or
         is_starting_punctuation(cat) or
@@ -22,7 +22,7 @@ def token_boundaries(s: str) -> StringMask:
     return line_break_opportunities(s) | delim | delim << 1
 
 class Token:
-    __slots__ = 'type', 'range', 'value'
+    __slots__ = '_type', '_range', '_value'
 
     class Type:
         __slots__ = 'ident',
@@ -42,9 +42,24 @@ class Token:
     RBRACKET = Type('rbracket')
 
     def __init__(self, type_: Type, range_: Optional[Tuple[int, int]], value: str):
-        self.type  = type_
-        self.range = range_
-        self.value = value
+        self._type  = type_
+        self._range = range_
+        self._value = value
+
+    @property
+    def type(self) -> Type:
+        return self._type
+
+    @property
+    def range(self) -> Optional[Tuple[int, int]]:
+        return self._range
+
+    @property
+    def value(self) -> str:
+        return self._value
+
+    def with_type(self, type_: Type) -> Token:
+        return Token(type_, self._range, self._value)
 
     def __repr__(self) -> str:
         return f'Token{{{str(self.type)}, {self.range}, \"{self.value}\"}}'
@@ -64,6 +79,8 @@ def tokenize(s: str) -> Generator[Token, None, None]:
 def normalize(tokens: Iterator[Token]) -> Generator[Token, None, None]:
     t0: Optional[Token] = None
 
+    VALUE_LIKE = (Token.LITERAL, Token.FUNCTION, Token.RBRACKET)
+
     while True:
         try:
             t1 = next(tokens)
@@ -72,83 +89,124 @@ def normalize(tokens: Iterator[Token]) -> Generator[Token, None, None]:
 
         if t0 and t0.type == Token.ESCAPE:
             if t1.value in Function.LOOKUP:
-                t1.type = Token.FUNCTION
+                t1 = t1.with_type(Token.FUNCTION)
             t0 = t1
         elif t1.value == '\\':
-            t1.type = Token.ESCAPE
+            t1 = t1.with_type(Token.ESCAPE)
             if t0:
                 yield t0
             t0 = t1
         elif t1.value in InfixOperator.LOOKUP:
-            t1.type = Token.INFIX
+            t1 = t1.with_type(Token.INFIX)
+            if not t0 or t0.type not in VALUE_LIKE:
+                yield Token(Token.LITERAL, None, '')
             if t0:
-                if t0.type == Token.SPACE:
-                    t0.type = Token.LITERAL
-                    yield Token(Token.SPACE, None, '')
                 yield t0
             t0 = t1
         elif t1.value == '{':
-            t1.type = Token.LBRACKET
+            t1 = t1.with_type(Token.LBRACKET)
             if t0:
                 yield t0
-                if t0.type in (Token.LITERAL, Token.FUNCTION, Token.RBRACKET):
+                if t0.type in VALUE_LIKE:
                     yield Token(Token.SPACE, None, '')
             t0 = t1
         elif t1.value == '}':
-            t1.type = Token.RBRACKET
+            t1 = t1.with_type(Token.RBRACKET)
             if t0:
                 yield t0
-                if t0.type == Token.LBRACKET:
-                    assert t0.value == '{'
+                if t0.type not in VALUE_LIKE:
                     yield Token(Token.LITERAL, None, '')
             t0 = t1
         elif all(is_breaking_space(c) for c in t1.value):
             if t0 and t0.type == Token.SPACE:
-                t0.value += t1.value
+                assert t0.range and t1.range
+                t0 = Token(Token.SPACE,
+                    (
+                        min(t0.range[0], t1.range[0]),
+                        max(t0.range[1], t1.range[1])
+                    ),
+                    t0.value + t1.value)
             else:
-                if t0 and t0.type in (Token.LITERAL, Token.FUNCTION, Token.RBRACKET):
-                    t1.type = Token.SPACE
+                if t0 and t0.type in VALUE_LIKE:
+                    t1 = t1.with_type(Token.SPACE)
                 else:
-                    t1.type = Token.LITERAL
+                    t1 = t1.with_type(Token.LITERAL)
                 if t0:
                     yield t0
                 t0 = t1
         else:
-            t1.type = Token.LITERAL
+            t1 = t1.with_type(Token.LITERAL)
             if t0:
                 yield t0
-                if t0.type in (Token.LITERAL, Token.FUNCTION, Token.RBRACKET):
+                if t0.type in VALUE_LIKE:
                     yield Token(Token.SPACE, None, '')
             t0 = t1
 
     if t0:
-        yield t0
+        if t0.type not in VALUE_LIKE:
+            yield t0
+            yield Token(Token.LITERAL, None, '')
+        else:
+            yield t0
 
 class Text:
-    __slots__ = 'x', 'y', 'text'
+    __slots__ = '_x', '_y', '_text'
 
     def __init__(self, x: int, y: int, text: str):
-        self.x = x
-        self.y = y
-        self.text = text
+        self._x = x
+        self._y = y
+        self._text = text
 
     def __repr__(self) -> str:
         return f'Text{{{self.x}, {self.y}, \"{self.text}\"}}'
+
+    @property
+    def x(self) -> int:
+        return self._x
+
+    @property
+    def y(self) -> int:
+        return self._y
+
+    @property
+    def text(self) -> str:
+        return self._text
+
+    def with_text(self, text: str) -> Text:
+        return Text(self._x, self._y, text)
+
+    def clone(self) -> Text:
+        return Text(self._x, self._y, self._text)
 
     @staticmethod
     def from_str(text: str) -> Text:
         return Text(0, 0, text)
 
 class TextBox:
-    __slots__ = 'width', 'height', 'baseline'
+    __slots__ = '_width', '_height', '_baseline'
 
     def __init__(self, width: int, height: int, baseline: int):
-        self.width    = width
-        self.height   = height
-        self.baseline = baseline
+        self._width    = width
+        self._height   = height
+        self._baseline = baseline
 
     def __repr__(self) -> str:
         return f'TextBox{{{self.width}x{self.height}, {self.baseline}}}'
+
+    @property
+    def width(self) -> int:
+        return self._width
+
+    @property
+    def height(self) -> int:
+        return self._height
+
+    @property
+    def baseline(self) -> int:
+        return self._baseline
+
+    def clone(self) -> TextBox:
+        return TextBox(self._width, self._height, self._baseline)
 
     @staticmethod
     def from_str(text: str) -> TextBox:
@@ -159,14 +217,28 @@ class TextBox:
         return TextBox(0, 0, 0)
 
 class TextGroup:
-    __slots__ = 'box', 'items'
+    __slots__ = '_box', '_items'
 
     def __init__(self, box: TextBox, items: List[Text]):
-        self.box = box
-        self.items = items
+        self._box = box
+        self._items = items
 
     def __repr__(self) -> str:
         return f'TextGroup{{{self.box}, {self.items}}}'
+
+    @property
+    def box(self) -> TextBox:
+        return self._box
+
+    @property
+    def items(self) -> List[Text]:
+        return self._items
+
+    def with_items(self, items: List[Text]) -> TextGroup:
+        return TextGroup(self._box, items)
+
+    def clone(self) -> TextGroup:
+        return TextGroup(self._box, [*self._items])
 
     def concat(self,
         other: TextGroup,
@@ -320,6 +392,41 @@ def fgcolor(tls, arg: TextGroup) -> Tuple[List[str], Optional[TextGroup]]:
     suffix = state[-1]
     return [], TextGroup(arg.box, [Text.from_str(prefix), *arg.items, Text.from_str(suffix)])
 
+@Function.define(False, 'int')
+def integral(arg: Optional[TextGroup]) -> Tuple[List[str], Optional[TextGroup]]:
+    if arg is None:
+        return [], None
+
+    if arg.box.height <= 1:
+        items: List[Text] = []
+        found = False
+        for item in arg.items:
+            if item.x == 0 and item.y == 0:
+                if item.text == '\N{INTEGRAL}':
+                    items += [item.with_text('\N{DOUBLE INTEGRAL}')]
+                    found = True
+                elif item.text == '\N{DOUBLE INTEGRAL}':
+                    items += [item.with_text('\N{TRIPLE INTEGRAL}')]
+                    found = True
+                else:
+                    items += [item]
+            else:
+                items += [item]
+        if found:
+            return [], arg.with_items(items)
+        else:
+            return [], TextGroup.from_str('\N{INTEGRAL}').concat(arg)
+
+    return [], vspan(
+            arg.box.height,
+            static_1 = '\N{INTEGRAL}',
+            dynamic_3 = (
+                '\N{BOTTOM HALF INTEGRAL}',
+                '\N{INTEGRAL EXTENSION}',
+                '\N{TOP HALF INTEGRAL}'
+            )
+        ).concat(arg)
+
 class InfixOperator:
     class Associativity:
         __slots__ = ()
@@ -377,6 +484,48 @@ def infix_text_under(lhs: TextGroup, rhs: TextGroup) -> TextGroup:
     y_offset = -rhs.box.height
     return lhs.concat(rhs, x_offset = x_offset, y_offset = y_offset)
 
+def vspan(
+    height: int,
+    static_1: str,
+    static_2: Optional[Tuple[str, str]]                 = None,
+    dynamic_3: Optional[Tuple[str, str, str]]           = None,
+    dynamic_5: Optional[Tuple[str, str, str, str, str]] = None
+) -> TextGroup:
+    lines = [static_1,]
+    if height >= 3 and dynamic_5:
+        d5 = dynamic_5
+        n0 = (height - 3) // 2
+        n1 = height - 3 - n0
+        lines = [d5[0], *([d5[1]]*n0), d5[2], *([d5[3]]*n1), d5[4]]
+    elif height == 2 and static_2:
+        lines = [*static_2]
+    elif height >= 2 and dynamic_3:
+        d3 = dynamic_3
+        n = height - 2
+        lines = [d3[0], *([d3[1]]*n), d3[2]]
+    LOG.debug(f'lines {lines}')
+    return TextGroup(TextBox(1, height, 0), [*(Text(0, y, line) for y, line in enumerate(lines))])
+
+@InfixOperator.define(False, '(', 1, InfixOperator.RIGHT)
+def infix_lparen(lhs: TextGroup, rhs: TextGroup) -> TextGroup:
+    h = rhs.box.height
+    text = vspan(h, static_1='(', dynamic_3=(
+        '\N{LEFT PARENTHESIS LOWER HOOK}',
+        '\N{LEFT PARENTHESIS EXTENSION}',
+        '\N{LEFT PARENTHESIS UPPER HOOK}'
+    ))
+    return lhs.concat(text.concat(rhs, y_offset = 0, baseline = (h-1)//2))
+
+@InfixOperator.define(False, ')', 1, InfixOperator.LEFT)
+def infix_rparen(lhs: TextGroup, rhs: TextGroup) -> TextGroup:
+    h = lhs.box.height
+    text = vspan(h, static_1=')', dynamic_3=(
+        '\N{RIGHT PARENTHESIS LOWER HOOK}',
+        '\N{RIGHT PARENTHESIS EXTENSION}',
+        '\N{RIGHT PARENTHESIS UPPER HOOK}'
+    ))
+    return lhs.concat(text, y_offset = 0, baseline = (h-1)//2).concat(rhs)
+
 # combined parsing and evaluation; uses shunting-yard based algorithm
 def layout(tokens: Iterator[Token]) -> Tuple[List[Tuple[str, Optional[Tuple[int, int]]]], TextGroup]:
     LOG.info('beginning parsing/layout')
@@ -393,7 +542,11 @@ def layout(tokens: Iterator[Token]) -> Tuple[List[Tuple[str, Optional[Tuple[int,
             quirks += [(quirk, token.range) for quirk in quirks_]
         if result:
             LOG.debug(f'\tresult {result}')
-            output += [result]
+            if operators and operators[-1].type == Token.FUNCTION:
+                token_ = operators.pop()
+                push_arg(token_, result)
+            else:
+                output += [result]
         else:
             operators += [token]
 
@@ -524,11 +677,16 @@ with WinAnsiMode():
     except NameError:
         pass
 
-    quirks, group = layout(normalize(tokenize(input('> '))))
+    while True:
+        s = input('> ')
+        if not s:
+            break
 
-    sys.stdout.write(ANSI_SAVE + ANSI_CLEAR)
-    for item in group.items:
-        sys.stdout.write(ansi_pos(10 - item.y, item.x + 1) + item.text)
-    sys.stdout.write(ANSI_RESTORE)
+        quirks, group = layout(normalize(tokenize(s)))
 
-    sys.stdout.flush()
+        sys.stdout.write(ANSI_SAVE + ANSI_CLEAR)
+        for item in group.items:
+            sys.stdout.write(ansi_pos(10 - item.y, item.x + 1) + item.text)
+        sys.stdout.write(ANSI_RESTORE)
+
+        sys.stdout.flush()
