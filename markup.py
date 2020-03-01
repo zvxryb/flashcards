@@ -397,7 +397,8 @@ def integral(arg: Optional[TextGroup]) -> Tuple[List[str], Optional[TextGroup]]:
     if arg is None:
         return [], None
 
-    if arg.box.height <= 1:
+    h = arg.box.height
+    if h <= 1:
         items: List[Text] = []
         found = False
         for item in arg.items:
@@ -418,14 +419,14 @@ def integral(arg: Optional[TextGroup]) -> Tuple[List[str], Optional[TextGroup]]:
             return [], TextGroup.from_str('\N{INTEGRAL}').concat(arg)
 
     return [], vspan(
-            arg.box.height,
+            h,
             static_1 = '\N{INTEGRAL}',
             dynamic_3 = (
                 '\N{BOTTOM HALF INTEGRAL}',
                 '\N{INTEGRAL EXTENSION}',
                 '\N{TOP HALF INTEGRAL}'
             )
-        ).concat(arg)
+        ).concat(arg, baseline = (h - 1) // 2)
 
 class InfixOperator:
     class Associativity:
@@ -641,6 +642,8 @@ def layout(tokens: Iterator[Token]) -> Tuple[List[Tuple[str, Optional[Tuple[int,
             text = TextGroup.from_str(token.value)
             if operators and operators[-1].type == Token.FUNCTION:
                 token_ = operators.pop()
+                quirks += [('function arguments should be grouped using brackets', token_.range)]
+                quirks += [('function argument missing brackets', token.range)]
                 push_arg(token_, text)
             else:
                 output += [text]
