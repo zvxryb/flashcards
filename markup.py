@@ -19,10 +19,11 @@ def token_boundaries(s: str) -> StringMask:
         is_starting_punctuation(cat) or
         is_ending_punctuation(cat)
         for c, cat in zip(s, cats))
-    return line_break_opportunities(s) | delim | delim << 1
+    number_sign = StringMask.collect(c == '#' for c in s)
+    return (line_break_opportunities(s) | delim | delim << 1) & ~number_sign
 
 class Token:
-    __slots__ = '_type', '_range', '_value'
+    __slots__ = '_type', '_scope', '_range', '_value'
 
     class Type:
         __slots__ = 'ident',
@@ -38,17 +39,23 @@ class Token:
     SPACE    = Type('whitespace')
     INFIX    = Type('infix')
     FUNCTION = Type('function')
+    MACRO    = Type('macro')
     LBRACKET = Type('lbracket')
     RBRACKET = Type('rbracket')
 
-    def __init__(self, type_: Type, range_: Optional[Tuple[int, int]], value: str):
+    def __init__(self, type_: Type, scope: Optional[str], range_: Optional[Tuple[int, int]], value: str):
         self._type  = type_
+        self._scope = scope
         self._range = range_
         self._value = value
 
     @property
     def type(self) -> Type:
         return self._type
+
+    @property
+    def scope(self) -> Optional[str]:
+        return self._scope
 
     @property
     def range(self) -> Optional[Tuple[int, int]]:
@@ -59,27 +66,27 @@ class Token:
         return self._value
 
     def with_type(self, type_: Type) -> Token:
-        return Token(type_, self._range, self._value)
+        return Token(type_, self._scope, self._range, self._value)
 
     def __repr__(self) -> str:
         return f'Token{{{str(self.type)}, {self.range}, \"{self.value}\"}}'
 
-def tokenize(s: str) -> Generator[Token, None, None]:
+def tokenize(s: str, scope: Optional[str] = None) -> Generator[Token, None, None]:
     breaks = token_boundaries(s)
     i = 0
     j = 0
     while j < len(s):
         if breaks[j]:
-            yield Token(Token.LITERAL, (i, j), s[i:j+1])
+            yield Token(Token.LITERAL, scope, (i, j), s[i:j+1])
             i = j+1
         j = j+1
     if i < len(s):
-        yield Token(Token.LITERAL, (i, j), s[i:])
+        yield Token(Token.LITERAL, scope, (i, j), s[i:])
 
 def normalize(tokens: Iterator[Token]) -> Generator[Token, None, None]:
     t0: Optional[Token] = None
 
-    VALUE_LIKE = (Token.LITERAL, Token.FUNCTION, Token.RBRACKET)
+    VALUE_LIKE = (Token.LITERAL, Token.FUNCTION, Token.MACRO, Token.RBRACKET)
 
     while True:
         try:
@@ -88,18 +95,20 @@ def normalize(tokens: Iterator[Token]) -> Generator[Token, None, None]:
             break
 
         if t0 and t0.type == Token.ESCAPE:
-            if t1.value in Function.LOOKUP:
+            if t1.value in Function.lookup:
                 t1 = t1.with_type(Token.FUNCTION)
+            elif t1.value in Macro.lookup:
+                t1 = t1.with_type(Token.MACRO)
             t0 = t1
         elif t1.value == '\\':
             t1 = t1.with_type(Token.ESCAPE)
             if t0:
                 yield t0
             t0 = t1
-        elif t1.value in InfixOperator.LOOKUP:
+        elif t1.value in InfixOperator.lookup:
             t1 = t1.with_type(Token.INFIX)
             if not t0 or t0.type not in VALUE_LIKE:
-                yield Token(Token.LITERAL, None, '')
+                yield Token(Token.LITERAL, t1.scope, None, '')
             if t0:
                 yield t0
             t0 = t1
@@ -108,19 +117,20 @@ def normalize(tokens: Iterator[Token]) -> Generator[Token, None, None]:
             if t0:
                 yield t0
                 if t0.type in VALUE_LIKE:
-                    yield Token(Token.SPACE, None, '')
+                    yield Token(Token.SPACE, t1.scope, None, '')
             t0 = t1
         elif t1.value == '}':
             t1 = t1.with_type(Token.RBRACKET)
             if t0:
                 yield t0
                 if t0.type not in VALUE_LIKE:
-                    yield Token(Token.LITERAL, None, '')
+                    yield Token(Token.LITERAL, t1.scope, None, '')
             t0 = t1
         elif all(is_breaking_space(c) for c in t1.value):
             if t0 and t0.type == Token.SPACE:
                 assert t0.range and t1.range
                 t0 = Token(Token.SPACE,
+                    t1.scope,
                     (
                         min(t0.range[0], t1.range[0]),
                         max(t0.range[1], t1.range[1])
@@ -139,13 +149,13 @@ def normalize(tokens: Iterator[Token]) -> Generator[Token, None, None]:
             if t0:
                 yield t0
                 if t0.type in VALUE_LIKE:
-                    yield Token(Token.SPACE, None, '')
+                    yield Token(Token.SPACE, t1.scope, None, '')
             t0 = t1
 
     if t0:
         if t0.type not in VALUE_LIKE:
             yield t0
-            yield Token(Token.LITERAL, None, '')
+            yield Token(Token.LITERAL, t1.scope, None, '')
         else:
             yield t0
 
@@ -281,35 +291,72 @@ class TextGroup:
     def empty() -> TextGroup:
         return TextGroup(TextBox.empty(), [])
 
-class Template:
-    __slots__ = 'argn', 'definition'
+class Macro:
+    lookup: Dict[str, Macro] = {}
+    tls = threading.local()
 
-    def __init__(self, argn: int, definition: str):
+    __slots__ = 'ident', 'argn', 'tokens'
+
+    def __init__(self, ident: str, argn: int, tokens: List[Token]):
+        self.ident = ident
         self.argn = argn
-        self.definition = definition
+        self.tokens = tokens
 
-    def evaluate(self, *args: TextGroup) -> Generator[Union[Token, TextGroup], None, None]:
-        assert self.argn == len(args)
+    @staticmethod
+    def match_group(token: Token) -> Optional[int]:
+        if token.type != Token.LITERAL:
+            return None
+        if len(token.value) < 2:
+            return None
+        if token.value[0] != '#':
+            return None
+        try:
+            group = int(token.value[1:])
+        except ValueError:
+            return None
+        group -= 1
+        if 0 <= group:
+            return group
+        return None
 
-        def match_group(argn: int, text: str) -> Optional[int]:
-            if len(text) < 2:
-                return None
-            if text[0] != '#':
-                return None
-            try:
-                group = int(text[1:])
-            except ValueError:
-                return None
-            if 0 <= group < argn:
-                return group
+    def push_arg(self, arg: Optional[TextGroup]) -> Optional[List[Union[Token, TextGroup]]]:
+        try:
+            state = Macro.tls.state
+        except AttributeError:
+            state = []
+            Macro.tls.state = state
+
+        if arg == None:
+            state += [[]]
+        else:
+            state[-1] += [arg]
+
+        if len(state[-1]) < self.argn:
             return None
 
-        for token in tokenize(self.definition):
-            group = match_group(self.argn, token.value)
+        args = state.pop()
+
+        def process_token(argn: int, args: List[TextGroup], token: Token):
+            assert len(args) == argn
+            group = Macro.match_group(token)
             if group is None:
-                yield token
+                return token
+            elif group > self.argn:
+                return token
             else:
-                yield args[group]
+                return args[group]
+        return [process_token(self.argn, args, token) for token in self.tokens]
+
+    @staticmethod
+    def create(ident: str, definition: str):
+        tokens = [*normalize(tokenize(definition))]
+        argn = 0
+        for token in tokens:
+            group = Macro.match_group(token)
+            if group and group >= argn:
+                argn = group + 1
+        macro = Macro(ident, argn, tokens)
+        Macro.lookup[ident] = macro
 
 def with_tls(f: Callable[..., Any]) -> Callable[..., Any]:
     tls = threading.local()
@@ -320,7 +367,7 @@ def with_tls(f: Callable[..., Any]) -> Callable[..., Any]:
 class Function:
     PushArgType = Callable[[Optional[TextGroup]], Tuple[List[str], Optional[TextGroup]]]
 
-    LOOKUP: Dict[str, Function] = {}
+    lookup: Dict[str, Function] = {}
 
     __slots__ = 'ident', 'push_arg'
 
@@ -338,7 +385,7 @@ class Function:
             if not ident:
                 ident = push_arg.__name__
             function = Function(ident, push_arg)
-            Function.LOOKUP[ident] = function
+            Function.lookup[ident] = function
             return function
         return f
 
@@ -351,7 +398,9 @@ FG_COLORS = {
     'magenta'      : ANSI_MAGENTA,
     'cyan'         : ANSI_CYAN,
     'lightgray'    : ANSI_WHITE,
+    'lightgrey'    : ANSI_WHITE,
     'darkgray'     : ANSI_BRIGHT_BLACK,
+    'darkgrey'     : ANSI_BRIGHT_BLACK,
     'brightred'    : ANSI_BRIGHT_RED,
     'brightgreen'  : ANSI_BRIGHT_GREEN,
     'brightyellow' : ANSI_BRIGHT_YELLOW,
@@ -399,7 +448,7 @@ class InfixOperator:
 
     EvaluateType = Callable[[TextGroup, TextGroup], TextGroup]
 
-    LOOKUP: Dict[str, InfixOperator] = {}
+    lookup: Dict[str, InfixOperator] = {}
 
     __slots__ = 'symbol', 'precedence', 'associativity', 'evaluate'
 
@@ -422,7 +471,7 @@ class InfixOperator:
     ) -> Callable[[InfixOperator.EvaluateType], InfixOperator]:
         def f(evaluate: InfixOperator.EvaluateType) -> InfixOperator:
             operator = InfixOperator(symbol, precedence, associativity, evaluate)
-            InfixOperator.LOOKUP[symbol] = operator
+            InfixOperator.lookup[symbol] = operator
             return operator
         return f
 
@@ -445,37 +494,51 @@ def infix_text_under(lhs: TextGroup, rhs: TextGroup) -> TextGroup:
     return lhs.concat(rhs, x_offset = x_offset, y_offset = y_offset)
 
 # combined parsing and evaluation; uses shunting-yard based algorithm
-def layout(tokens: Iterator[Token]) -> Tuple[List[Tuple[str, Optional[Tuple[int, int]]]], TextGroup]:
+def layout(tokens: Iterator[Token]) -> Tuple[List[Tuple[str, Optional[str], Optional[Tuple[int, int]]]], TextGroup]:
     LOG.info('beginning parsing/layout')
 
     output: List[TextGroup] = []
     operators: List[Token] = []
-    quirks: List[Tuple[str, Optional[Tuple[int, int]]]] = []
+    quirks: List[Tuple[str, Optional[str], Optional[Tuple[int, int]]]] = []
 
     def push_arg(token: Token, arg: Optional[TextGroup]):
         nonlocal output, operators, quirks
         LOG.debug(f'push_arg {token} {arg}')
-        quirks_, result = Function.LOOKUP[token.value].push_arg(arg)
-        if quirks_:
-            quirks += [(quirk, token.range) for quirk in quirks_]
-        if result:
-            LOG.debug(f'\tresult {result}')
-            if operators and operators[-1].type == Token.FUNCTION:
-                token_ = operators.pop()
-                push_arg(token_, result)
+        if token.type == Token.FUNCTION:
+            quirks_, result = Function.lookup[token.value].push_arg(arg)
+            if quirks_:
+                quirks += [(quirk, token.scope, token.range) for quirk in quirks_]
+            if result:
+                LOG.debug(f'\tresult {result}')
+                if operators and operators[-1].type == Token.FUNCTION:
+                    token_ = operators.pop()
+                    push_arg(token_, result)
+                else:
+                    output += [result]
             else:
-                output += [result]
+                operators += [token]
+        elif token.type == Token.MACRO:
+            result_ = Macro.lookup[token.value].push_arg(arg)
+            if result_:
+                LOG.debug(f'\tresult {result_}')
+                for token_or_text in result_:
+                    if isinstance(token_or_text, TextGroup):
+                        output += [token_or_text]
+                    else:
+                        process_input(token_or_text)
+            else:
+                operators += [token]
         else:
-            operators += [token]
+            assert False
 
     def evaluate(token: Token):
         nonlocal output, quirks
         LOG.debug(f'eval {token}')
         if token.type == Token.FUNCTION:
-            quirks += [('missing argument for function', token.range)]
+            quirks += [('missing argument for function', token.scope, token.range)]
             push_arg(token, TextGroup.empty())
         elif token.type == Token.INFIX:
-            op = InfixOperator.LOOKUP[token.value]
+            op = InfixOperator.lookup[token.value]
             rhs = TextGroup.empty()
             lhs = TextGroup.empty()
             try:
@@ -486,7 +549,7 @@ def layout(tokens: Iterator[Token]) -> Tuple[List[Tuple[str, Optional[Tuple[int,
                 LOG.debug(f'lhs {lhs}')
                 LOG.debug(f'\ttail {output}')
             except IndexError:
-                quirks += [('missing operand', token.range)]
+                quirks += [('missing operand', token.scope, token.range)]
             output += [op.evaluate(lhs, rhs)]
             LOG.debug(f'result {output[-1]}')
         elif token.type == Token.SPACE:
@@ -506,11 +569,13 @@ def layout(tokens: Iterator[Token]) -> Tuple[List[Tuple[str, Optional[Tuple[int,
         else:
             assert False
 
+    FUNCTIONAL = (Token.FUNCTION, Token.MACRO)
+
     def process_input(token: Token):
         nonlocal output, operators, quirks
         LOG.debug('-'*80)
         LOG.debug(f'input {token}')
-        if token.type == Token.FUNCTION:
+        if token.type in FUNCTIONAL:
             push_arg(token, None)
         elif token.type == Token.LBRACKET:
             assert token.value == '{'
@@ -521,23 +586,23 @@ def layout(tokens: Iterator[Token]) -> Tuple[List[Tuple[str, Optional[Tuple[int,
                 try:
                     token_ = operators.pop()
                 except IndexError:
-                    quirks += [('unmatched right brace', token.range)]
+                    quirks += [('unmatched right brace', token.scope, token.range)]
                     break
                 if token_.type == Token.LBRACKET:
                     assert token_.value == '{'
                     break
                 else:
                     evaluate(token_)
-            if operators and operators[-1].type == Token.FUNCTION:
+            if operators and operators[-1].type in FUNCTIONAL:
                 token_ = operators.pop()
                 arg = output.pop()
                 push_arg(token_, arg)
         elif token.type == Token.INFIX:
-            op = InfixOperator.LOOKUP[token.value]
+            op = InfixOperator.lookup[token.value]
             while operators:
                 token_ = operators[-1]
                 try:
-                    op_ = InfixOperator.LOOKUP[token_.value]
+                    op_ = InfixOperator.lookup[token_.value]
                 except KeyError:
                     break
                 if op.precedence > op_.precedence:
@@ -548,7 +613,7 @@ def layout(tokens: Iterator[Token]) -> Tuple[List[Tuple[str, Optional[Tuple[int,
                 evaluate(token_)
             operators += [token]
         elif token.type == Token.SPACE:
-            if operators and operators[-1].type == Token.FUNCTION:
+            if operators and operators[-1].type in FUNCTIONAL:
                 pass
             else:
                 while operators and operators[-1].type != Token.LBRACKET:
@@ -557,10 +622,10 @@ def layout(tokens: Iterator[Token]) -> Tuple[List[Tuple[str, Optional[Tuple[int,
                 operators += [token]
         else:
             text = TextGroup.from_str(token.value)
-            if operators and operators[-1].type == Token.FUNCTION:
+            if operators and operators[-1].type in FUNCTIONAL:
                 token_ = operators.pop()
-                quirks += [('function arguments should be grouped using brackets', token_.range)]
-                quirks += [('function argument missing brackets', token.range)]
+                quirks += [('function/macro arguments should be grouped using brackets', token_.scope, token_.range)]
+                quirks += [('function/macro argument missing brackets', token.scope, token.range)]
                 push_arg(token_, text)
             else:
                 output += [text]
@@ -574,14 +639,14 @@ def layout(tokens: Iterator[Token]) -> Tuple[List[Tuple[str, Optional[Tuple[int,
         token = operators.pop()
         if token.type == Token.LBRACKET:
             assert token.value == '{'
-            quirks += [('unmatched left brace', token.range)]
+            quirks += [('unmatched left brace', token.scope, token.range)]
         else:
             evaluate(token)
 
     if not output:
-        quirks += [('empty output', None)]
+        quirks += [('empty output', None, None)]
     elif len(output) > 1:
-        quirks += [('unprocessed operands in output', None)]
+        quirks += [('unprocessed operands in output', None, None)]
 
     LOG.info(f'quirks {quirks}')
     return quirks, reduce(lambda output, item: output.concat(item), output, TextGroup.empty())
