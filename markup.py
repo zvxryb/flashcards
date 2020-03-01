@@ -13,7 +13,7 @@ LOG = logging.getLogger(__name__)
 def token_boundaries(s: str) -> StringMask:
     cats = [unicodedata.category(c) for c in s]
     delim = StringMask.collect(
-        c in ('\\', '(', '{', '}', '`', '^', '_') or
+        c in ('\\', '{', '}', '^', '_') or
         is_breaking_space(c, cat) or
         is_inner_punctuation(cat) or
         is_starting_punctuation(cat) or
@@ -322,24 +322,22 @@ class Function:
 
     LOOKUP: Dict[str, Function] = {}
 
-    __slots__ = 'math_mode', 'ident', 'push_arg'
+    __slots__ = 'ident', 'push_arg'
 
     def __init__(self,
-        math_mode: bool,
         ident: str,
         push_arg: Function.PushArgType
     ):
-        self.math_mode = math_mode
         self.ident     = ident
         self.push_arg  = push_arg
 
     @staticmethod
-    def define(math_mode: bool, ident: str = '') -> Callable[[Function.PushArgType], Function]:
+    def define(ident: str = '') -> Callable[[Function.PushArgType], Function]:
         def f(push_arg: Function.PushArgType) -> Function:
             nonlocal ident
             if not ident:
                 ident = push_arg.__name__
-            function = Function(math_mode, ident, push_arg)
+            function = Function(ident, push_arg)
             Function.LOOKUP[ident] = function
             return function
         return f
@@ -363,7 +361,7 @@ FG_COLORS = {
     'white'        : ANSI_BRIGHT_WHITE
 }
 
-@Function.define(False, 'fgcolor')
+@Function.define('fgcolor')
 @with_tls
 def fgcolor(tls, arg: TextGroup) -> Tuple[List[str], Optional[TextGroup]]:
     try:
@@ -392,42 +390,6 @@ def fgcolor(tls, arg: TextGroup) -> Tuple[List[str], Optional[TextGroup]]:
     suffix = state[-1]
     return [], TextGroup(arg.box, [Text.from_str(prefix), *arg.items, Text.from_str(suffix)])
 
-@Function.define(False, 'int')
-def integral(arg: Optional[TextGroup]) -> Tuple[List[str], Optional[TextGroup]]:
-    if arg is None:
-        return [], None
-
-    h = arg.box.height
-    if h <= 1:
-        items: List[Text] = []
-        found = False
-        for item in arg.items:
-            if item.x == 0 and item.y == 0:
-                if item.text == '\N{INTEGRAL}':
-                    items += [item.with_text('\N{DOUBLE INTEGRAL}')]
-                    found = True
-                elif item.text == '\N{DOUBLE INTEGRAL}':
-                    items += [item.with_text('\N{TRIPLE INTEGRAL}')]
-                    found = True
-                else:
-                    items += [item]
-            else:
-                items += [item]
-        if found:
-            return [], arg.with_items(items)
-        else:
-            return [], TextGroup.from_str('\N{INTEGRAL}').concat(arg)
-
-    return [], vspan(
-            h,
-            static_1 = '\N{INTEGRAL}',
-            dynamic_3 = (
-                '\N{BOTTOM HALF INTEGRAL}',
-                '\N{INTEGRAL EXTENSION}',
-                '\N{TOP HALF INTEGRAL}'
-            )
-        ).concat(arg, baseline = (h - 1) // 2)
-
 class InfixOperator:
     class Associativity:
         __slots__ = ()
@@ -439,16 +401,14 @@ class InfixOperator:
 
     LOOKUP: Dict[str, InfixOperator] = {}
 
-    __slots__ = 'math_mode', 'symbol', 'precedence', 'associativity', 'evaluate'
+    __slots__ = 'symbol', 'precedence', 'associativity', 'evaluate'
 
     def __init__(self,
-        math_mode    : bool,
         symbol       : str,
         precedence   : int,
         associativity: Associativity,
         evaluate     : InfixOperator.EvaluateType
     ):
-        self.math_mode     = math_mode
         self.symbol        = symbol
         self.precedence    = precedence
         self.associativity = associativity
@@ -456,18 +416,17 @@ class InfixOperator:
 
     @staticmethod
     def define(
-        math_mode    : bool,
         symbol       : str,
         precedence   : int,
         associativity: Associativity
     ) -> Callable[[InfixOperator.EvaluateType], InfixOperator]:
         def f(evaluate: InfixOperator.EvaluateType) -> InfixOperator:
-            operator = InfixOperator(math_mode, symbol, precedence, associativity, evaluate)
+            operator = InfixOperator(symbol, precedence, associativity, evaluate)
             InfixOperator.LOOKUP[symbol] = operator
             return operator
         return f
 
-@InfixOperator.define(False, '^', 10, InfixOperator.RIGHT)
+@InfixOperator.define('^', 10, InfixOperator.LEFT)
 def infix_text_over(lhs: TextGroup, rhs: TextGroup) -> TextGroup:
     width = max(lhs.box.width, rhs.box.width)
     lhs_pad = (width - lhs.box.width) // 2
@@ -476,7 +435,7 @@ def infix_text_over(lhs: TextGroup, rhs: TextGroup) -> TextGroup:
     y_offset = lhs.box.height
     return lhs.concat(rhs, x_offset = x_offset, y_offset = y_offset)
 
-@InfixOperator.define(False, '_', 10, InfixOperator.RIGHT)
+@InfixOperator.define('_', 10, InfixOperator.LEFT)
 def infix_text_under(lhs: TextGroup, rhs: TextGroup) -> TextGroup:
     width = max(lhs.box.width, rhs.box.width)
     lhs_pad = (width - lhs.box.width) // 2
@@ -484,48 +443,6 @@ def infix_text_under(lhs: TextGroup, rhs: TextGroup) -> TextGroup:
     x_offset = rhs_pad - lhs_pad
     y_offset = -rhs.box.height
     return lhs.concat(rhs, x_offset = x_offset, y_offset = y_offset)
-
-def vspan(
-    height: int,
-    static_1: str,
-    static_2: Optional[Tuple[str, str]]                 = None,
-    dynamic_3: Optional[Tuple[str, str, str]]           = None,
-    dynamic_5: Optional[Tuple[str, str, str, str, str]] = None
-) -> TextGroup:
-    lines = [static_1,]
-    if height >= 3 and dynamic_5:
-        d5 = dynamic_5
-        n0 = (height - 3) // 2
-        n1 = height - 3 - n0
-        lines = [d5[0], *([d5[1]]*n0), d5[2], *([d5[3]]*n1), d5[4]]
-    elif height == 2 and static_2:
-        lines = [*static_2]
-    elif height >= 2 and dynamic_3:
-        d3 = dynamic_3
-        n = height - 2
-        lines = [d3[0], *([d3[1]]*n), d3[2]]
-    LOG.debug(f'lines {lines}')
-    return TextGroup(TextBox(1, height, 0), [*(Text(0, y, line) for y, line in enumerate(lines))])
-
-@InfixOperator.define(False, '(', 1, InfixOperator.RIGHT)
-def infix_lparen(lhs: TextGroup, rhs: TextGroup) -> TextGroup:
-    h = rhs.box.height
-    text = vspan(h, static_1='(', dynamic_3=(
-        '\N{LEFT PARENTHESIS LOWER HOOK}',
-        '\N{LEFT PARENTHESIS EXTENSION}',
-        '\N{LEFT PARENTHESIS UPPER HOOK}'
-    ))
-    return lhs.concat(text.concat(rhs, y_offset = 0, baseline = (h-1)//2))
-
-@InfixOperator.define(False, ')', 1, InfixOperator.LEFT)
-def infix_rparen(lhs: TextGroup, rhs: TextGroup) -> TextGroup:
-    h = lhs.box.height
-    text = vspan(h, static_1=')', dynamic_3=(
-        '\N{RIGHT PARENTHESIS LOWER HOOK}',
-        '\N{RIGHT PARENTHESIS EXTENSION}',
-        '\N{RIGHT PARENTHESIS UPPER HOOK}'
-    ))
-    return lhs.concat(text, y_offset = 0, baseline = (h-1)//2).concat(rhs)
 
 # combined parsing and evaluation; uses shunting-yard based algorithm
 def layout(tokens: Iterator[Token]) -> Tuple[List[Tuple[str, Optional[Tuple[int, int]]]], TextGroup]:

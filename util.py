@@ -24,7 +24,7 @@ def char_width(c: str) -> int:
     if c in ('\N{ZWSP}',):
         return 0
     w = unicodedata.east_asian_width(c)
-    return 2 if w in ('A', 'F', 'W') else 1
+    return 2 if w in ('F', 'W') else 1
 
 def unicode_width(s: str) -> int:
     return reduce(lambda w, c: w + char_width(c), s, 0)
