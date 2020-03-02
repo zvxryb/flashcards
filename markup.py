@@ -504,13 +504,13 @@ def layout(tokens: Iterator[Token], max_width: int) -> Tuple[List[Tuple[str, Opt
 
     def push_arg(token: Token, arg: Optional[TextGroup]):
         nonlocal output, operators, quirks
-        LOG.debug(f'push_arg {token} {arg}')
+        LOG.debug('push_arg %s %s', token, arg)
         if token.type == Token.FUNCTION:
             quirks_, result = Function.lookup[token.value].push_arg(arg)
             if quirks_:
                 quirks += [(quirk, token.scope, token.range) for quirk in quirks_]
             if result:
-                LOG.debug(f'\tresult {result}')
+                LOG.debug('\tresult %s', result)
                 if operators and operators[-1].type == Token.FUNCTION:
                     token_ = operators.pop()
                     push_arg(token_, result)
@@ -521,7 +521,7 @@ def layout(tokens: Iterator[Token], max_width: int) -> Tuple[List[Tuple[str, Opt
         elif token.type == Token.MACRO:
             result_ = Macro.lookup[token.value].push_arg(arg)
             if result_:
-                LOG.debug(f'\tresult {result_}')
+                LOG.debug('\tresult %s', result_)
                 for token_or_text in result_:
                     if isinstance(token_or_text, TextGroup):
                         output += [token_or_text]
@@ -534,7 +534,7 @@ def layout(tokens: Iterator[Token], max_width: int) -> Tuple[List[Tuple[str, Opt
 
     def evaluate(token: Token):
         nonlocal output, quirks
-        LOG.debug(f'eval {token}')
+        LOG.debug('eval %s', token)
         if token.type == Token.FUNCTION:
             quirks += [('missing argument for function', token.scope, token.range)]
             push_arg(token, TextGroup.empty())
@@ -544,25 +544,25 @@ def layout(tokens: Iterator[Token], max_width: int) -> Tuple[List[Tuple[str, Opt
             lhs = TextGroup.empty()
             try:
                 rhs = output.pop()
-                LOG.debug(f'rhs {rhs}')
-                LOG.debug(f'\ttail {output}')
+                LOG.debug('rhs %s', rhs)
+                LOG.debug('\ttail %s', output)
                 lhs = output.pop()
-                LOG.debug(f'lhs {lhs}')
-                LOG.debug(f'\ttail {output}')
+                LOG.debug('lhs %s', lhs)
+                LOG.debug('\ttail %s', output)
             except IndexError:
                 quirks += [('missing operand', token.scope, token.range)]
             output += [op.evaluate(lhs, rhs)]
-            LOG.debug(f'result {output[-1]}')
+            LOG.debug('result %s', output[-1])
         elif token.type == Token.SPACE:
             rhs = TextGroup.empty()
             lhs = TextGroup.empty()
             try:
                 rhs = output.pop()
-                LOG.debug(f'rhs {rhs}')
-                LOG.debug(f'\ttail {output}')
+                LOG.debug('rhs %s', rhs)
+                LOG.debug('\ttail %s', output)
                 lhs = output.pop()
-                LOG.debug(f'lhs {lhs}')
-                LOG.debug(f'\ttail {output}')
+                LOG.debug('lhs %s', lhs)
+                LOG.debug('\ttail %s', output)
             except IndexError:
                 pass
             space = TextGroup.from_str(token.value)
@@ -570,7 +570,7 @@ def layout(tokens: Iterator[Token], max_width: int) -> Tuple[List[Tuple[str, Opt
                 output += [lhs.concat(space), rhs]
             else:
                 output += [lhs.concat(space).concat(rhs)]
-            LOG.debug(f'result {output[-1]}')
+            LOG.debug('result %s', output[-1])
         else:
             assert False
 
@@ -579,7 +579,7 @@ def layout(tokens: Iterator[Token], max_width: int) -> Tuple[List[Tuple[str, Opt
     def process_input(token: Token):
         nonlocal depth, output, operators, quirks
         LOG.debug('-'*80)
-        LOG.debug(f'input {token}')
+        LOG.debug('input %s', token)
         if token.type in FUNCTIONAL:
             push_arg(token, None)
         elif token.type == Token.LBRACKET:
@@ -636,8 +636,8 @@ def layout(tokens: Iterator[Token], max_width: int) -> Tuple[List[Tuple[str, Opt
                 push_arg(token_, text)
             else:
                 output += [text]
-        LOG.debug(f'output state {output}')
-        LOG.debug(f'operators state {operators}')
+        LOG.debug('output state %s', output)
+        LOG.debug('operators state %s', operators)
 
     for token in tokens:
         process_input(token)
@@ -653,7 +653,7 @@ def layout(tokens: Iterator[Token], max_width: int) -> Tuple[List[Tuple[str, Opt
     if not output:
         quirks += [('empty output', None, None)]
 
-    LOG.info(f'quirks {quirks}')
+    LOG.info('quirks %s', quirks)
     return quirks, reduce(
         lambda output, line: output.concat(line, x_offset = 0, y_offset = -line.box.height),
         output, TextGroup.empty())
