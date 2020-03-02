@@ -494,9 +494,10 @@ def infix_text_under(lhs: TextGroup, rhs: TextGroup) -> TextGroup:
     return lhs.concat(rhs, x_offset = x_offset, y_offset = y_offset)
 
 # combined parsing and evaluation; uses shunting-yard based algorithm
-def layout(tokens: Iterator[Token]) -> Tuple[List[Tuple[str, Optional[str], Optional[Tuple[int, int]]]], TextGroup]:
+def layout(tokens: Iterator[Token], max_width: int) -> Tuple[List[Tuple[str, Optional[str], Optional[Tuple[int, int]]]], TextGroup]:
     LOG.info('beginning parsing/layout')
 
+    depth: int = 0
     output: List[TextGroup] = []
     operators: List[Token] = []
     quirks: List[Tuple[str, Optional[str], Optional[Tuple[int, int]]]] = []
@@ -564,7 +565,11 @@ def layout(tokens: Iterator[Token]) -> Tuple[List[Tuple[str, Optional[str], Opti
                 LOG.debug(f'\ttail {output}')
             except IndexError:
                 pass
-            output += [lhs.concat(TextGroup.from_str(token.value)).concat(rhs)]
+            space = TextGroup.from_str(token.value)
+            if depth <= 0 and lhs.box.width + space.box.width + rhs.box.width > max_width:
+                output += [lhs.concat(space), rhs]
+            else:
+                output += [lhs.concat(space).concat(rhs)]
             LOG.debug(f'result {output[-1]}')
         else:
             assert False
@@ -572,7 +577,7 @@ def layout(tokens: Iterator[Token]) -> Tuple[List[Tuple[str, Optional[str], Opti
     FUNCTIONAL = (Token.FUNCTION, Token.MACRO)
 
     def process_input(token: Token):
-        nonlocal output, operators, quirks
+        nonlocal depth, output, operators, quirks
         LOG.debug('-'*80)
         LOG.debug(f'input {token}')
         if token.type in FUNCTIONAL:
@@ -580,6 +585,7 @@ def layout(tokens: Iterator[Token]) -> Tuple[List[Tuple[str, Optional[str], Opti
         elif token.type == Token.LBRACKET:
             assert token.value == '{'
             operators += [token]
+            depth += 1
         elif token.type == Token.RBRACKET:
             assert token.value == '}'
             while True:
@@ -590,6 +596,7 @@ def layout(tokens: Iterator[Token]) -> Tuple[List[Tuple[str, Optional[str], Opti
                     break
                 if token_.type == Token.LBRACKET:
                     assert token_.value == '{'
+                    depth -= 1
                     break
                 else:
                     evaluate(token_)
@@ -645,11 +652,11 @@ def layout(tokens: Iterator[Token]) -> Tuple[List[Tuple[str, Optional[str], Opti
 
     if not output:
         quirks += [('empty output', None, None)]
-    elif len(output) > 1:
-        quirks += [('unprocessed operands in output', None, None)]
 
     LOG.info(f'quirks {quirks}')
-    return quirks, reduce(lambda output, item: output.concat(item), output, TextGroup.empty())
+    return quirks, reduce(
+        lambda output, line: output.concat(line, x_offset = 0, y_offset = -line.box.height),
+        output, TextGroup.empty())
 
 with WinAnsiMode():
     log_handler = logging.FileHandler('markup.log', encoding='utf-8')
@@ -667,7 +674,7 @@ with WinAnsiMode():
         if not s:
             break
 
-        quirks, group = layout(normalize(tokenize(s)))
+        quirks, group = layout(normalize(tokenize(s)), 20)
 
         sys.stdout.write(ANSI_SAVE + ANSI_CLEAR)
         for item in group.items:
