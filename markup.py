@@ -5,7 +5,6 @@ from functools import reduce
 from typing import Any, Callable, Dict, Generator, Iterator, List, Optional, Tuple, Union
 
 from ansi_esc import *
-from console_ui import WinAnsiMode
 from util import is_breaking_space, is_inner_punctuation, is_starting_punctuation, is_ending_punctuation, line_break_opportunities, StringMask, unicode_width, unicode_center
 
 LOG = logging.getLogger(__name__)
@@ -77,7 +76,7 @@ def tokenize(s: str, scope: Optional[str] = None) -> Generator[Token, None, None
     j = 0
     while j < len(s):
         if breaks[j]:
-            yield Token(Token.LITERAL, scope, (i, j), s[i:j+1])
+            yield Token(Token.LITERAL, scope, (i, j+1), s[i:j+1])
             i = j+1
         j = j+1
     if i < len(s):
@@ -104,6 +103,8 @@ def normalize(tokens: Iterator[Token]) -> Generator[Token, None, None]:
             t1 = t1.with_type(Token.ESCAPE)
             if t0:
                 yield t0
+                if t0.type in VALUE_LIKE:
+                    yield Token(Token.SPACE, t1.scope, None, '')
             t0 = t1
         elif t1.value in InfixOperator.lookup:
             t1 = t1.with_type(Token.INFIX)
@@ -477,24 +478,18 @@ class InfixOperator:
 
 @InfixOperator.define('^', 10, InfixOperator.LEFT)
 def infix_text_over(lhs: TextGroup, rhs: TextGroup) -> TextGroup:
-    width = max(lhs.box.width, rhs.box.width)
-    lhs_pad = (width - lhs.box.width) // 2
-    rhs_pad = (width - rhs.box.width) // 2
-    x_offset = rhs_pad - lhs_pad
+    x_offset = (lhs.box.width - rhs.box.width)//2
     y_offset = lhs.box.height
     return lhs.concat(rhs, x_offset = x_offset, y_offset = y_offset)
 
 @InfixOperator.define('_', 10, InfixOperator.LEFT)
 def infix_text_under(lhs: TextGroup, rhs: TextGroup) -> TextGroup:
-    width = max(lhs.box.width, rhs.box.width)
-    lhs_pad = (width - lhs.box.width) // 2
-    rhs_pad = (width - rhs.box.width) // 2
-    x_offset = rhs_pad - lhs_pad
+    x_offset = (lhs.box.width - rhs.box.width)//2
     y_offset = -rhs.box.height
     return lhs.concat(rhs, x_offset = x_offset, y_offset = y_offset)
 
 # combined parsing and evaluation; uses shunting-yard based algorithm
-def layout(tokens: Iterator[Token], max_width: int) -> Tuple[List[Tuple[str, Optional[str], Optional[Tuple[int, int]]]], TextGroup]:
+def layout(tokens: Iterator[Token], max_width: int, center: bool) -> Tuple[List[Tuple[str, Optional[str], Optional[Tuple[int, int]]]], TextGroup]:
     LOG.info('beginning parsing/layout')
 
     depth: int = 0
@@ -567,7 +562,7 @@ def layout(tokens: Iterator[Token], max_width: int) -> Tuple[List[Tuple[str, Opt
                 pass
             space = TextGroup.from_str(token.value)
             if depth <= 0 and lhs.box.width + space.box.width + rhs.box.width > max_width:
-                output += [lhs.concat(space), rhs]
+                output += [lhs, rhs]
             else:
                 output += [lhs.concat(space).concat(rhs)]
             LOG.debug('result %s', output[-1])
@@ -653,32 +648,37 @@ def layout(tokens: Iterator[Token], max_width: int) -> Tuple[List[Tuple[str, Opt
     if not output:
         quirks += [('empty output', None, None)]
 
-    LOG.info('quirks %s', quirks)
-    return quirks, reduce(
-        lambda output, line: output.concat(line, x_offset = 0, y_offset = -line.box.height),
-        output, TextGroup.empty())
+    def append_line(lhs, rhs, center):
+        x_offset = (lhs.box.width - rhs.box.width)//2 if center else 0
+        y_offset = -rhs.box.height
+        return lhs.concat(rhs, x_offset=x_offset, y_offset=y_offset)
 
-with WinAnsiMode():
+    LOG.info('quirks %s', quirks)
+    return quirks, reduce(lambda output, line: append_line(output, line, center), output, TextGroup.empty())
+
+if __name__ == '__main__':
     log_handler = logging.FileHandler('markup.log', encoding='utf-8')
     log_handler.setLevel(logging.DEBUG)
     LOG.setLevel(logging.DEBUG)
     LOG.addHandler(log_handler)
 
-    try:
-        input = raw_input
-    except NameError:
-        pass
+    from console_ui import WinAnsiMode
+    with WinAnsiMode():
+        try:
+            input = raw_input
+        except NameError:
+            pass
 
-    while True:
-        s = input('> ')
-        if not s:
-            break
+        while True:
+            s = input('> ')
+            if not s:
+                break
 
-        quirks, group = layout(normalize(tokenize(s)), 20)
+            quirks, group = layout(normalize(tokenize(s)), 20, True)
 
-        sys.stdout.write(ANSI_SAVE + ANSI_CLEAR)
-        for item in group.items:
-            sys.stdout.write(ansi_pos(10 - item.y, item.x + 1) + item.text)
-        sys.stdout.write(ANSI_RESTORE)
+            sys.stdout.write(ANSI_SAVE + ANSI_CLEAR)
+            for item in group.items:
+                sys.stdout.write(ansi_pos(10 - item.y, item.x + 1) + item.text)
+            sys.stdout.write(ANSI_RESTORE)
 
-        sys.stdout.flush()
+            sys.stdout.flush()

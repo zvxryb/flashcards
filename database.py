@@ -14,6 +14,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import contextlib, os, sqlite3
+from typing import Any, Dict, List, Optional, Tuple, Sequence
 
 DB_SCHEMA = ('''
 CREATE TABLE decks (
@@ -52,7 +53,7 @@ CREATE TABLE session_cards (
 class Cursor:
     __slots__ = 'cur'
 
-    def __init__(self, cur):
+    def __init__(self, cur: sqlite3.Cursor):
         self.cur = cur
 
     def __del__(self):
@@ -67,7 +68,9 @@ class Cursor:
         self.cur.execute('SELECT * FROM sessions')
         return self.cur.fetchall()
 
-    def list_decks(self, session=None):
+    def list_decks(self,
+        session: Optional[int] = None
+    ) -> List[Tuple[int, str]]:
         if session:
             self.cur.execute('''
                 SELECT * FROM decks WHERE id IN
@@ -77,10 +80,19 @@ class Cursor:
             self.cur.execute('SELECT * FROM decks')
         return self.cur.fetchall()
 
-    def list_cards(self, session_id=None, deck_id=None, contains_text=None):
+    def list_cards(self,
+        session_id: Optional[int] = None,
+        deck_id: Optional[int] = None,
+        contains_text: Optional[str] = None,
+        before_id: Optional[int] = None,
+        after_id: Optional[int] = None,
+        limit: Optional[int] = None,
+        get_tail: Optional[bool] = None
+    ) -> List[Tuple[int, int, str, str]]:
         query = 'SELECT * FROM cards'
-        where = []
-        args = {}
+        ordering = 'ORDER BY id DESC' if get_tail else 'ORDER BY id ASC'
+        where: List[str] = []
+        args: Dict[str, Any] = {}
         if session_id is not None:
             where += ['(id IN (SELECT card_id FROM session_cards WHERE session_id=:session_id))']
             args = {**args, 'session_id': session_id}
@@ -90,70 +102,98 @@ class Cursor:
         if contains_text is not None:
             where += ['(front LIKE :contains_text OR back LIKE :contains_text)']
             args = {**args, 'contains_text': '%'+contains_text+'%'}
+        if before_id is not None:
+            assert get_tail is None
+            ordering = 'ORDER BY id DESC'
+            where += ['(id < :before_id)']
+            args = {**args, 'before_id': before_id}
+        if after_id is not None:
+            assert get_tail is None
+            ordering = 'ORDER BY id ASC'
+            where += ['(id > :after_id)']
+            args = {**args, 'after_id': after_id}
+
         if where:
             query += ' WHERE ' + ' AND '.join(where)
-        self.cur.execute(query, args)
-        return self.cur.fetchall()
+        query += ' ' + ordering
 
-    def get_deck_id(self, name):
+        if limit is not None:
+            query += ' LIMIT :limit'
+            args = {**args, 'limit': limit}
+
+        self.cur.execute(query, args)
+        cards = self.cur.fetchall()
+        cards.sort(key = lambda card: card[0])
+        return cards
+
+    def get_deck_id(self, name: str) -> int:
         self.cur.execute('SELECT id FROM decks WHERE name=?', (name,))
         deck = self.cur.fetchone()
         if not deck:
             raise Exception(f'no deck named {name} exists')
         return deck[0]
 
-    def create_deck(self, name):
+    def create_deck(self, name: str) -> int:
         self.cur.execute('INSERT INTO decks (name) VALUES (?)', (name,))
         return self.cur.lastrowid
 
-    def get_card(self, card_id):
+    def get_card(self, card_id: int) -> Tuple[int, int, str, str]:
         self.cur.execute('SELECT * FROM cards WHERE id == ?', (card_id,))
         return self.cur.fetchone()
 
-    def update_card(self, card_id, front, back):
+    def update_card(self, card_id: int, front: str, back: str):
         self.cur.execute(
             'UPDATE cards SET front=:front, back=:back WHERE id=:card_id',
             {'card_id': card_id, 'front': front, 'back': back})
-        return self.cur.fetchone()
+        if self.cur.rowcount != 1:
+            raise Exception('failed to update card')
 
-    def add_cards(self, deck, cards):
+    def add_card(self, deck_id: int, front: str, back: str) -> int:
+        self.cur.execute(
+            'INSERT INTO cards (deck_id, front, back) VALUES (?, ?, ?)',
+            (deck_id, front, back))
+        if self.cur.rowcount != 1:
+            raise Exception('failed to create card')
+        return self.cur.lastrowid
+
+    def add_cards(self, deck: int, cards: Sequence[Tuple[str, str]]):
         self.cur.executemany(
             'INSERT INTO cards (deck_id, front, back) VALUES (?, ?, ?)',
             [(deck, front, back) for (front, back) in cards])
         if self.cur.rowcount != len(cards):
             raise Exception('failed to create card')
 
-    def delete_card(self, card_id):
+    def delete_card(self, card_id: int):
         self.cur.execute('DELETE FROM session_cards WHERE card_id=?', (card_id,))
         self.cur.execute('DELETE FROM cards WHERE id=?', (card_id,))
         if self.cur.rowcount != 1:
             raise Exception('failed to delete card')
 
-    def get_session_id(self, name):
+    def get_session_id(self, name: str) -> int:
         self.cur.execute('SELECT id FROM sessions WHERE name=?', (name,))
         session = self.cur.fetchone()
         if not session:
             raise Exception(f'no session named {name} exists')
         return session[0]
 
-    def create_session(self, name):
+    def create_session(self, name: str) -> int:
         self.cur.execute('INSERT INTO sessions (name, counter) VALUES (?, ?)', (name, 0))
         if self.cur.rowcount != 1:
             raise Exception('failed to create session')
         return self.cur.lastrowid
 
-    def get_session_counter(self, session):
+    def get_session_counter(self, session: int) -> int:
         self.cur.execute('SELECT counter FROM sessions WHERE id=?', (session,))
         return self.cur.fetchone()[0]
 
-    def add_session_decks(self, session, decks):
+    def add_session_decks(self, session: int, decks: List[int]):
         self.cur.executemany(
             'INSERT INTO session_decks (session_id, deck_id) VALUES (?, ?)',
             [(session, deck) for deck in decks])
         if self.cur.rowcount != len(decks):
             raise Exception('failed to add decks to session')
 
-    def get_session_decks(self, session_id):
+    def get_session_decks(self, session_id: int) -> List[int]:
         self.cur.execute(
             'SELECT session_decks.deck_id FROM session_decks WHERE session_id=?',
             (session_id,))
@@ -162,7 +202,7 @@ class Cursor:
             raise Exception('failed to get session decks')
         return [row[0] for row in rows]
 
-    def cleanup_session_cards(self, session_id):
+    def cleanup_session_cards(self, session_id: int):
         self.cur.execute(
             '''DELETE FROM session_cards
                 WHERE session_id=?
@@ -178,7 +218,7 @@ class Cursor:
         if self.cur.rowcount < 0:
             raise Exception('failed to cleanup session card info')
 
-    def update_session_decks(self, session_id, deck_ids):
+    def update_session_decks(self, session_id: int, deck_ids: List[int]):
         self.cur.execute(
             'DELETE FROM session_decks WHERE session_id=?',
             (session_id,))
@@ -188,7 +228,10 @@ class Cursor:
         self.add_session_decks(session_id, deck_ids)
         self.cleanup_session_cards(session_id)
 
-    def get_new_cards(self, session, limit):
+    def get_new_cards(self,
+        session: int,
+        limit: int
+    ) -> List[Tuple[int, str, str, str]]:
         self.cur.execute('''
             SELECT cards.id, decks.name, cards.front, cards.back
                 FROM cards
@@ -207,7 +250,10 @@ class Cursor:
             {'session': session, 'limit': limit})
         return self.cur.fetchall()
 
-    def get_review_cards(self, session, limit):
+    def get_review_cards(self,
+        session: int,
+        limit: int
+    ) -> List[Tuple[int, str, str, str, int]]:
         counter = self.get_session_counter(session)
         self.cur.execute(
             '''SELECT cards.id, decks.name, cards.front, cards.back, session_cards.streak
@@ -223,10 +269,10 @@ class Cursor:
             {'session': session, 'counter': counter, 'limit': limit})
         return self.cur.fetchall()
 
-    def increment_session_counter(self, session):
+    def increment_session_counter(self, session: int):
         self.cur.execute('UPDATE sessions SET counter = counter + 1 WHERE id=?', (session,))
 
-    def update_session_card(self, session, card, streak, review_at):
+    def update_session_card(self, session: int, card: int, streak: int, review_at: int):
         self.cur.execute('''
             INSERT INTO session_cards
                 (session_id, card_id, streak, review_at)
@@ -241,7 +287,7 @@ class Cursor:
 class Database:
     __slots__ = 'path', 'db', 'cur'
 
-    def __init__(self, path):
+    def __init__(self, path: str):
         self.path = path
         exists = os.path.exists(self.path)
         self.db = sqlite3.connect(self.path, isolation_level=None)
@@ -258,14 +304,14 @@ class Database:
         self.db.commit()
         self.db.close()
 
-    def __enter__(self):
+    def __enter__(self) -> Cursor:
         self.db.__enter__()
         cur = self.db.cursor()
         cur.execute('BEGIN')
         self.cur = Cursor(cur)
         return self.cur
 
-    def __exit__(self, type, value, tb):
+    def __exit__(self, type_, value, tb):
         self.cur.close()
         self.cur = None
-        self.db.__exit__(type, value, tb)
+        self.db.__exit__(type_, value, tb)

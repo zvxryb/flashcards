@@ -7,6 +7,7 @@ ANSI_UP      = '\033[A'
 ANSI_DOWN    = '\033[B'
 ANSI_FORWARD = '\033[C'
 ANSI_BACK    = '\033[D'
+ANSI_UNDERLINE = ansi_sgr(4)
 ANSI_REVERSE = ansi_sgr(7)
 ANSI_BLACK   = ansi_sgr(30)
 ANSI_RED     = ansi_sgr(31)
