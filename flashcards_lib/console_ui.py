@@ -21,9 +21,9 @@ LOG = logging.getLogger(__name__)
 
 Box = Tuple[int, int, int, int]
 
-import markup
-from ansi_esc import *
-from util import char_width, unicode_width, line_break_opportunities
+import flashcards_lib.markup as markup
+from flashcards_lib.ansi_esc import *
+from flashcards_lib.util import char_width, unicode_width, line_break_opportunities
 
 STD_OUTPUT_HANDLE = -11
 ENABLE_VIRTUAL_TERMINAL_PROCESSING = 4

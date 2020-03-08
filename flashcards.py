@@ -20,9 +20,11 @@ from random import shuffle
 from textwrap import TextWrapper
 from typing import Any, Dict, List, Optional, Tuple, Sequence
 
-from console_ui import EditorApp, PracticeApp, QuestionResult, WinAnsiMode, RESULT_PASS, RESULT_FAIL
-from database import Database
-from util import unicode_ljust
+from flashcards_lib.console_ui import WinAnsiMode
+from flashcards_lib.editor_app import EditorApp
+from flashcards_lib.practice_app import PracticeApp, QuestionResult, RESULT_PASS, RESULT_FAIL
+from flashcards_lib.database import Database
+from flashcards_lib.util import unicode_ljust
 
 LOG = logging.getLogger(__name__)
 
@@ -283,7 +285,6 @@ def run_editor(db: Database, deck_id: Optional[int] = None, card_id: Optional[in
             print('no deck ID or card ID given')
             return -1
 
-        from console_ui import WinAnsiMode
         with WinAnsiMode():
             app = EditorApp(on_submit, on_scroll)
             if card_id is not None:

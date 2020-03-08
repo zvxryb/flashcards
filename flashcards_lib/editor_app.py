@@ -20,8 +20,8 @@ LOG = logging.getLogger(__name__)
 
 Box = Tuple[int, int, int, int]
 
-from ansi_esc import *
-from console_ui import (
+from flashcards_lib.ansi_esc import *
+from flashcards_lib.console_ui import (
     Input,
     MarkupDrawer,
     ASCII_ESC,

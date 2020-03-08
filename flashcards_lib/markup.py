@@ -1,11 +1,26 @@
+# Copyright 2020 Michael Lodato <zvxryb@gmail.com>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 from __future__ import annotations
 
 import logging, sys, threading, unicodedata
 from functools import reduce
 from typing import Any, Callable, Dict, Generator, Iterator, List, Optional, Tuple, Union
 
-from ansi_esc import *
-from util import is_breaking_space, is_inner_punctuation, is_starting_punctuation, is_ending_punctuation, line_break_opportunities, StringMask, unicode_width, unicode_center
+from flashcards_lib.ansi_esc import *
+from flashcards_lib.util import is_breaking_space, is_inner_punctuation, is_starting_punctuation, is_ending_punctuation, line_break_opportunities, StringMask, unicode_width, unicode_center
 
 LOG = logging.getLogger(__name__)
 
