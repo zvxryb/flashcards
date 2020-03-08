@@ -14,6 +14,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import codecs, logging, msvcrt, sys
+from pathlib import Path
 from typing import Any, Callable, List, Optional, Tuple
 
 LOG = logging.getLogger(__name__)
@@ -70,7 +71,8 @@ class EditorApp:
 
         sys.stdout.write(ANSI_CLEAR + ANSI_RESET)
 
-        with codecs.open('editor_ui_utf8.txt', 'r', 'utf-8') as f:
+        lib_path = Path(__file__).parent
+        with codecs.open(lib_path / 'editor_ui_utf8.txt', 'r', 'utf-8') as f:
             sys.stdout.write(f.read())
 
         sys.stdout.write(ansi_pos(

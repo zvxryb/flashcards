@@ -124,7 +124,8 @@ class PracticeApp:
 
         sys.stdout.write(ANSI_CLEAR + ANSI_RESET)
 
-        with codecs.open('practice_ui_utf8.txt', 'r', 'utf-8') as f:
+        lib_path = Path(__file__).parent
+        with codecs.open(lib_path / 'practice_ui_utf8.txt', 'r', 'utf-8') as f:
             sys.stdout.write(f.read())
 
         sys.stdout.write(ansi_pos(ANSWER_BOX[0], ANSWER_BOX[1]))
