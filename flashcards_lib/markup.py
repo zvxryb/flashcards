@@ -512,6 +512,8 @@ def layout(tokens: Iterator[Token], max_width: int, center: bool) -> Tuple[List[
     operators: List[Token] = []
     quirks: List[Tuple[str, Optional[str], Optional[Tuple[int, int]]]] = []
 
+    FUNCTIONAL = (Token.FUNCTION, Token.MACRO)
+
     def push_arg(token: Token, arg: Optional[TextGroup]):
         nonlocal output, operators, quirks
         LOG.debug('push_arg %s %s', token, arg)
@@ -545,8 +547,8 @@ def layout(tokens: Iterator[Token], max_width: int, center: bool) -> Tuple[List[
     def evaluate(token: Token):
         nonlocal output, quirks
         LOG.debug('eval %s', token)
-        if token.type == Token.FUNCTION:
-            quirks += [('missing argument for function', token.scope, token.range)]
+        if token.type in FUNCTIONAL:
+            quirks += [('missing argument for function or macro', token.scope, token.range)]
             push_arg(token, TextGroup.empty())
         elif token.type == Token.INFIX:
             op = InfixOperator.lookup[token.value]
@@ -583,8 +585,6 @@ def layout(tokens: Iterator[Token], max_width: int, center: bool) -> Tuple[List[
             LOG.debug('result %s', output[-1])
         else:
             assert False
-
-    FUNCTIONAL = (Token.FUNCTION, Token.MACRO)
 
     def process_input(token: Token):
         nonlocal depth, output, operators, quirks

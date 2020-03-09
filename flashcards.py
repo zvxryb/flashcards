@@ -34,7 +34,7 @@ try:
 except NameError:
     pass
 
-def once(f: Callable[..., Any]):
+def once(f: Callable[..., Any]) -> Callable[..., Any]:
     called = False
     def g(*args, **kwargs):
         nonlocal called
@@ -43,6 +43,7 @@ def once(f: Callable[..., Any]):
         else:
             LOG.debug('%s called more than once', f.__name__)
         called = True
+    return g
 
 @once
 def load_macros(db: Database):
