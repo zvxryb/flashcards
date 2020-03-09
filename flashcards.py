@@ -262,7 +262,7 @@ def run_editor(db: Database, deck_id: Optional[int] = None, card_id: Optional[in
 
         n = len(EditorApp.CARD_BROWSER)
 
-        try_update_cards(False, {
+        try_update_cards(True, {
             'deck_id': deck_id,
             'before_id': card_id + 1,
             'limit': n,
