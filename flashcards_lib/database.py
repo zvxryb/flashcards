@@ -264,9 +264,11 @@ class Cursor:
             '''SELECT cards.id, decks.name, cards.front, cards.back, session_cards.streak
                 FROM session_cards
                 INNER JOIN cards ON
-                    session_cards.session_id = :session AND
-                    session_cards.review_at <= :counter AND
-                    session_cards.card_id = cards.id
+                    session_cards.session_id = :session
+                    AND (
+                        session_cards.review_at IS NULL OR
+                        session_cards.review_at <= :counter)
+                    AND session_cards.card_id = cards.id
                 LEFT JOIN decks ON
                     cards.deck_id == decks.id
                 ORDER BY session_cards.review_at ASC
