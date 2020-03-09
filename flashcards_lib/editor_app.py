@@ -14,6 +14,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import codecs, logging, msvcrt, sys
+from msvcrt import getwch # type: ignore
 from pathlib import Path
 from typing import Any, Callable, List, Optional, Tuple
 
@@ -72,7 +73,7 @@ class EditorApp:
         sys.stdout.write(ANSI_CLEAR + ANSI_RESET)
 
         lib_path = Path(__file__).parent
-        with codecs.open(lib_path / 'editor_ui_utf8.txt', 'r', 'utf-8') as f:
+        with codecs.open(lib_path / 'editor_ui_utf8.txt', 'r', 'utf-8') as f: # type: ignore
             sys.stdout.write(f.read())
 
         sys.stdout.write(ansi_pos(
@@ -225,13 +226,13 @@ class EditorApp:
                 elif event_or_input == Input.TAB:
                     self.flip_card(True)
             else:
-                char = msvcrt.getwch()
+                char = getwch()
                 if char == ASCII_ESC:
                     self.set_selected(None)
                 elif char == '\x03' or char == '\x04':
                     raise KeyboardInterrupt()
                 elif char == MS_KEY_ESC0 or char == MS_KEY_ESC1:
-                    char2 = msvcrt.getwch()
+                    char2 = getwch()
                     if char2 == MS_KEY_UP or char2 == MS_KEY_DOWN:
                         self.select_card(char2 == MS_KEY_UP)
                     elif char2 == MS_KEY_PAGE_UP:
@@ -263,7 +264,7 @@ def example_main():
             for i in range(3)
         ])
 
-    from console_ui import WinAnsiMode
+    from flashcards_lib.console_ui import WinAnsiMode
     with WinAnsiMode():
         app = EditorApp(lambda id, front, back: None, on_scroll)
         app.main()

@@ -677,10 +677,10 @@ if __name__ == '__main__':
     LOG.setLevel(logging.DEBUG)
     LOG.addHandler(log_handler)
 
-    from console_ui import WinAnsiMode
+    from flashcards_lib.console_ui import WinAnsiMode
     with WinAnsiMode():
         try:
-            input = raw_input
+            input = raw_input # type: ignore
         except NameError:
             pass
 

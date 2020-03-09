@@ -18,20 +18,38 @@ from argparse import ArgumentParser
 from itertools import zip_longest
 from random import shuffle
 from textwrap import TextWrapper
-from typing import Any, Dict, List, Optional, Tuple, Sequence
+from typing import Any, Callable, Dict, List, Optional, Tuple, Sequence
 
 from flashcards_lib.console_ui import WinAnsiMode
 from flashcards_lib.editor_app import EditorApp
 from flashcards_lib.practice_app import PracticeApp, QuestionResult, RESULT_PASS, RESULT_FAIL
 from flashcards_lib.database import Database
 from flashcards_lib.util import unicode_ljust
+from flashcards_lib.markup import Macro
 
 LOG = logging.getLogger(__name__)
 
 try:
-    input = raw_input
+    input = raw_input # type: ignore
 except NameError:
     pass
+
+def once(f: Callable[..., Any]):
+    called = False
+    def g(*args, **kwargs):
+        nonlocal called
+        if not called:
+            f(*args, **kwargs)
+        else:
+            LOG.debug('%s called more than once', f.__name__)
+        called = True
+
+@once
+def load_macros(db: Database):
+    with db as cur:
+        macros = cur.list_macros()
+    for macro_id, name, definition in macros:
+        Macro.create(name, definition)
 
 def print_table(cols: Sequence[Tuple[str, int]], rows: Sequence[Sequence[Any]]):
     cols_ = [(name, TextWrapper(width), width) for name, width in cols]
@@ -78,6 +96,9 @@ def cmd_list(
                 session_id=(cur.get_session_id(session_name) if session_name else None),
                 deck_id   =(cur.get_deck_id   (deck_name   ) if deck_name    else None),
                 contains_text=contains_text)
+        elif list_type == 'macros':
+            cols = ('id', 5), ('name', 20), ('definition', 60)
+            rows = cur.list_macros()
         else:
             return -1
     print_table(cols, rows)
@@ -149,7 +170,15 @@ def cmd_create(db_path: str, item_type: str) -> int:
             with db as cur:
                 deck_id = cur.get_deck_id(name)
 
-        run_editor(db, deck_id = deck_id)
+        return run_editor(db, deck_id = deck_id)
+
+    elif item_type == 'macro':
+        name       = input('New macro name: ')
+        definition = input('New macro definition: ')
+        with db as cur:
+            macro_id = cur.create_macro(name, definition)
+        print(f'created macro {macro_id}: {name} => {definition}')
+
     return 0
 
 def cmd_delete(db_path: str, item_type: str, item_id: int) -> int:
@@ -158,7 +187,13 @@ def cmd_delete(db_path: str, item_type: str, item_id: int) -> int:
     if item_type == 'card':
         with db as cur:
             cur.delete_card(item_id)
-        print(f'Updated card {item_id}')
+        print(f'Deleted card {item_id}')
+
+    elif item_type == 'macro':
+        with db as cur:
+            cur.delete_macro(item_id)
+        print(f'Deleted macro {item_id}')
+
     return 0
 
 def cmd_import(db_path: str, deck_name: str, in_path: str, format: str) -> int:
@@ -193,6 +228,8 @@ def cmd_export(db_path: str, deck_name: str, out_path: str, format: str) -> int:
 
 def run_editor(db: Database, deck_id: Optional[int] = None, card_id: Optional[int] = None) -> int:
     app: Optional[EditorApp] = None
+
+    load_macros(db)
 
     def try_update_cards(scroll_up: bool, list_kwargs):
         nonlocal db, app
@@ -299,6 +336,9 @@ def run_editor(db: Database, deck_id: Optional[int] = None, card_id: Optional[in
 
 def cmd_start(db_path: str, session_name: str, round_cards: int) -> int:
     db = Database(db_path)
+
+    load_macros(db)
+
     with db as cur:
         session_id = cur.get_session_id(session_name)
 
@@ -408,7 +448,7 @@ def main(argv: List[str]) -> int:
     export_args = commands.add_parser('export', help='export a deck')
     start_args  = commands.add_parser('start' , help='start a session')
 
-    list_args.add_argument('type', choices=('sessions', 'decks', 'cards'))
+    list_args.add_argument('type', choices=('sessions', 'decks', 'cards', 'macros'))
     list_args.add_argument('--in-session')
     list_args.add_argument('--in-deck')
     list_args.add_argument('--contains-text')
@@ -418,9 +458,9 @@ def main(argv: List[str]) -> int:
     modify_args.add_argument('--front')
     modify_args.add_argument('--back')
 
-    create_args.add_argument('type', choices=('session', 'deck', 'cards'))
+    create_args.add_argument('type', choices=('session', 'deck', 'cards', 'macro'))
 
-    delete_args.add_argument('type', choices=('card',))
+    delete_args.add_argument('type', choices=('card', 'macro'))
     delete_args.add_argument('--id', required=True, type=int)
 
     import_args.add_argument('deck')

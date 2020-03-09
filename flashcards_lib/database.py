@@ -17,30 +17,30 @@ import contextlib, os, sqlite3
 from typing import Any, Dict, List, Optional, Tuple, Sequence
 
 DB_SCHEMA = ('''
-CREATE TABLE decks (
+CREATE TABLE IF NOT EXISTS decks (
     id   INTEGER NOT NULL PRIMARY KEY,
     name TEXT NOT NULL UNIQUE
 )''', '''
-CREATE TABLE cards (
+CREATE TABLE IF NOT EXISTS cards (
     id      INTEGER NOT NULL PRIMARY KEY,
     deck_id INTEGER NOT NULL,
     front   TEXT NOT NULL,
     back    TEXT NOT NULL,
     FOREIGN KEY(deck_id) REFERENCES decks(id)
 )''', '''
-CREATE TABLE sessions (
+CREATE TABLE IF NOT EXISTS sessions (
     id INTEGER NOT NULL PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
     counter INTEGER NOT NULL
 )''', '''
-CREATE TABLE session_decks (
+CREATE TABLE IF NOT EXISTS session_decks (
     session_id INTEGER NOT NULL,
     deck_id    INTEGER NOT NULL,
     FOREIGN KEY(session_id) REFERENCES sessions(id),
     FOREIGN KEY(deck_id   ) REFERENCES decks   (id),
     UNIQUE(session_id, deck_id)
 )''', '''
-CREATE TABLE session_cards (
+CREATE TABLE IF NOT EXISTS session_cards (
     session_id INTEGER NOT NULL,
     card_id    INTEGER NOT NULL,
     streak     INTEGER,
@@ -48,6 +48,11 @@ CREATE TABLE session_cards (
     FOREIGN KEY(session_id) REFERENCES sessions(id),
     FOREIGN KEY(card_id   ) REFERENCES cards   (id),
     UNIQUE(session_id, card_id)
+)''', '''
+CREATE TABLE IF NOT EXISTS macros (
+    id         INTEGER NOT NULL PRIMARY KEY,
+    name       TEXT    NOT NULL UNIQUE,
+    definition TEXT    NOT NULL
 )''')
 
 class Cursor:
@@ -284,21 +289,42 @@ class Cursor:
         if self.cur.rowcount != 1:
             raise Exception('failed to update session card info')
 
+    def get_macro(self, macro_id: int) -> Tuple[int, str, str]:
+        self.cur.execute('SELECT * FROM macros WHERE id = ?', (macro_id,))
+        if self.cur.rowcount != 1:
+            raise Exception('failed to get macro')
+        return self.cur.fetchone()
+
+    def create_macro(self, name: str, definition: str) -> int:
+        self.cur.execute(
+            'INSERT INTO macros (name, definition) VALUES (?, ?)',
+            (name, definition))
+        if self.cur.rowcount != 1:
+            raise Exception('failed to create macro')
+        return self.cur.lastrowid
+
+    def delete_macro(self, macro_id: int):
+        self.cur.execute('DELETE FROM macros WHERE id = ?', (macro_id,))
+        if self.cur.rowcount != 1:
+            raise Exception('failed to delete macro')
+
+    def list_macros(self) -> List[Tuple[int, str, str]]:
+        self.cur.execute('SELECT * FROM macros')
+        return self.cur.fetchall()
+
 class Database:
     __slots__ = 'path', 'db', 'cur'
 
     def __init__(self, path: str):
         self.path = path
-        exists = os.path.exists(self.path)
         self.db = sqlite3.connect(self.path, isolation_level=None)
         #self.db.set_trace_callback(print)
-        if not exists:
-            with self.db:
-                cur = self.db.cursor()
-                cur.execute('BEGIN')
-                for table in DB_SCHEMA:
-                    cur.execute(table)
-                cur.close()
+        with self.db:
+            cur = self.db.cursor()
+            cur.execute('BEGIN')
+            for table in DB_SCHEMA:
+                cur.execute(table)
+            cur.close()
 
     def __del__(self):
         self.db.commit()

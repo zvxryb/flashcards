@@ -13,7 +13,9 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import codecs, logging, msvcrt, sys
+import codecs, logging, sys
+from msvcrt import getwch # type: ignore
+from pathlib import Path
 from typing import Any, Callable, Optional, Tuple, Union
 
 LOG = logging.getLogger(__name__)
@@ -125,7 +127,7 @@ class PracticeApp:
         sys.stdout.write(ANSI_CLEAR + ANSI_RESET)
 
         lib_path = Path(__file__).parent
-        with codecs.open(lib_path / 'practice_ui_utf8.txt', 'r', 'utf-8') as f:
+        with codecs.open(lib_path / 'practice_ui_utf8.txt', 'r', 'utf-8') as f: # type: ignore
             sys.stdout.write(f.read())
 
         sys.stdout.write(ansi_pos(ANSWER_BOX[0], ANSWER_BOX[1]))
@@ -229,13 +231,13 @@ class PracticeApp:
                 elif event_or_input == Input.KEY_DOWN:
                     self.select_item(False)
             else:
-                char = msvcrt.getwch()
+                char = getwch()
                 if char == ASCII_ESC:
                     self.set_selected(None)
                 elif char == '\x03' or char == '\x04':
                     raise KeyboardInterrupt()
                 elif char == MS_KEY_ESC0 or char == MS_KEY_ESC1:
-                    char2 = msvcrt.getwch()
+                    char2 = getwch()
                     if char2 == MS_KEY_UP or char2 == MS_KEY_DOWN:
                         self.select_item(char2 == MS_KEY_UP)
                 elif char == ' ':

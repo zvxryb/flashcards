@@ -13,8 +13,9 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import ctypes, logging, msvcrt, sys, time
+import ctypes, logging, sys, time
 from ctypes.wintypes import DWORD
+from msvcrt import getwch, kbhit # type: ignore
 from typing import Callable, List, Optional, Tuple, Union
 
 LOG = logging.getLogger(__name__)
@@ -411,7 +412,7 @@ class Input:
             if timeout_s is not None:
                 time.sleep(0.0001)
                 time_s = time.perf_counter()
-                if msvcrt.kbhit():
+                if kbhit():
                     last_key_s = time_s
                     result = self.process_char()
                     if result is not None:
@@ -427,7 +428,7 @@ class Input:
                     return result
 
     def process_char(self) -> Optional[Union[Event, str]]:
-        char = msvcrt.getwch()
+        char = getwch()
         if char == ASCII_ESC:
             self.unfocus()
             return Input.UNFOCUS
@@ -453,7 +454,7 @@ class Input:
                 self.update_cursor()
                 self.redraw_input()
         elif char == MS_KEY_ESC0 or char == MS_KEY_ESC1:
-            char2 = msvcrt.getwch()
+            char2 = getwch()
             if char2 == MS_KEY_UP:
                 self.unfocus()
                 return Input.KEY_UP
