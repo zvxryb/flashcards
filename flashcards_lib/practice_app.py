@@ -26,6 +26,7 @@ from flashcards_lib.ansi_esc import *
 from flashcards_lib.console_ui import (
     Formatter,
     Input,
+    MarkupDrawer,
     ASCII_ESC,
     MS_KEY_ESC0,
     MS_KEY_ESC1,
@@ -64,10 +65,10 @@ class HistoryForm:
         expected: Box,
         answered: Box
     ):
-        self.result   = Formatter(*result  , False, False)
-        self.question = Formatter(*question, False, False)
-        self.expected = Formatter(*expected, False, False)
-        self.answered = Formatter(*answered, False, False)
+        self.result   = Formatter(*result, False, False)
+        self.question = MarkupDrawer(*question, False, False)
+        self.expected = MarkupDrawer(*expected, False, False)
+        self.answered = MarkupDrawer(*answered, False, False)
 
     def update_result(self, result: Optional[QuestionResult], highlight: bool):
         if result is None:
@@ -119,7 +120,7 @@ class PracticeApp:
     def __init__(self, on_submit: Callable[[str], bool], on_revise: Callable[[Any, QuestionResult], None]):
         self.answer    = Input(ANSWER_BOX)
         self.history   = [HistoryData() for _ in HISTORY_FORMS]
-        self.question_formatter = Formatter(*QUESTION_BOX, True , True )
+        self.question = MarkupDrawer(*QUESTION_BOX, True , True )
         self.selected  = None
         self.on_submit = on_submit
         self.on_revise = on_revise
@@ -169,8 +170,8 @@ class PracticeApp:
             ansi_pos(TOTAL_BOX [0], TOTAL_BOX [1]) + total  +
             ANSI_RESTORE)
 
-        self.question_formatter.text = question
-        self.question_formatter.redraw()
+        self.question.text = question
+        self.question.redraw()
 
     def set_selected(self, selected: Optional[int]):
         if self.selected is not None:
