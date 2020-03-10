@@ -13,12 +13,14 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import csv, json, logging, sys, unicodedata
+import csv, json, logging, logging.config, sys, unicodedata
 from argparse import ArgumentParser
 from itertools import zip_longest
 from random import shuffle
 from textwrap import TextWrapper
 from typing import Any, Callable, Dict, List, Optional, Tuple, Sequence
+
+logging.config.fileConfig('logging.cfg', disable_existing_loggers=False)
 
 from flashcards_lib.console_ui import WinAnsiMode
 from flashcards_lib.editor_app import EditorApp
@@ -431,12 +433,6 @@ def cmd_start(db_path: str, session_name: str, round_cards: int) -> int:
         return app.main()
 
 def main(argv: List[str]) -> int:
-    log_handler = logging.FileHandler('main.log', encoding='utf-8')
-    log_handler.setLevel(logging.DEBUG)
-    ui_logger = logging.getLogger('console_ui')
-    LOG.setLevel(logging.DEBUG)
-    LOG.addHandler(log_handler)
-
     parse = ArgumentParser()
     parse.add_argument('--db', required=True)
     commands = parse.add_subparsers(dest='cmd')
@@ -494,4 +490,10 @@ def main(argv: List[str]) -> int:
     return 0
 
 if __name__ == '__main__':
-    sys.exit(main(sys.argv))
+    LOG.info('caught exception')
+    try:
+        sys.exit(main(sys.argv))
+    except:
+        LOG.exception('caught exception')
+        print('Caught exception (see log for details)')
+        sys.exit(-1)

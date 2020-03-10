@@ -17,12 +17,40 @@ from __future__ import annotations
 
 import logging, sys, threading, unicodedata
 from functools import reduce
+from logging.handlers import MemoryHandler
 from typing import Any, Callable, Dict, Generator, Iterator, List, Optional, Tuple, Union
 
 from flashcards_lib.ansi_esc import *
 from flashcards_lib.util import is_breaking_space, is_inner_punctuation, is_starting_punctuation, is_ending_punctuation, line_break_opportunities, StringMask, unicode_width, unicode_center
 
 LOG = logging.getLogger(__name__)
+
+# this needs to be an instance of MemoryHandler to support the "target" config attribute special case...
+class MarkupLogHandler(MemoryHandler):
+    instance: Optional[MarkupLogHandler] = None
+
+    __slots__ = ()
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        assert MarkupLogHandler.instance is None
+        MarkupLogHandler.instance = self
+
+    def shouldFlush(self, record: logging.LogRecord) -> bool:
+        return False
+
+    @staticmethod
+    def get():
+        assert MarkupLogHandler.instance
+        return MarkupLogHandler.instance
+
+    def discard(self):
+        self.acquire()
+        try:
+            self.buffer.clear()
+        finally:
+            self.release()
 
 def token_boundaries(s: str) -> StringMask:
     cats = [unicodedata.category(c) for c in s]
@@ -179,6 +207,7 @@ class Text:
     __slots__ = '_x', '_y', '_text'
 
     def __init__(self, x: int, y: int, text: str):
+        assert text is not None
         self._x = x
         self._y = y
         self._text = text
@@ -428,31 +457,31 @@ FG_COLORS = {
 
 @Function.define('fgcolor')
 @with_tls
-def fgcolor(tls, arg: TextGroup) -> Tuple[List[str], Optional[TextGroup]]:
+def fgcolor(tls, arg: Optional[TextGroup]) -> Tuple[List[str], Optional[TextGroup]]:
     try:
         state = tls.state
     except AttributeError:
-        state = [ANSI_DEFAULT]
+        state = [(False, ANSI_DEFAULT)]
         tls.state = state
 
     if arg is None:
-        state += [None]
+        state += [(False, state[-1][1])]
         return [], None
 
-    if state[-1] is None:
+    if not state[-1][0]:
         for item in arg.items:
             key = item.text.strip().lower()
             try:
                 color = FG_COLORS[key]
             except KeyError:
                 continue
-            state[-1] = color
+            state[-1] = (True, color)
             return [], None
-        state[-1] = ANSI_DEFAULT
+        state[-1] = (True, state[-1][1])
         return ['failed to get color'], None
 
-    prefix = state.pop()
-    suffix = state[-1]
+    prefix = state.pop()[1]
+    suffix = state[-1][1]
     return [], TextGroup(arg.box, [Text.from_str(prefix), *arg.items, Text.from_str(suffix)])
 
 class InfixOperator:
@@ -649,27 +678,35 @@ def layout(tokens: Iterator[Token], max_width: int, center: bool) -> Tuple[List[
         LOG.debug('output state %s', output)
         LOG.debug('operators state %s', operators)
 
-    for token in tokens:
-        process_input(token)
+    try:
+        for token in tokens:
+            process_input(token)
 
-    while operators:
-        token = operators.pop()
-        if token.type == Token.LBRACKET:
-            assert token.value == '{'
-            quirks += [('unmatched left brace', token.scope, token.range)]
-        else:
-            evaluate(token)
+        while operators:
+            token = operators.pop()
+            if token.type == Token.LBRACKET:
+                assert token.value == '{'
+                quirks += [('unmatched left brace', token.scope, token.range)]
+            else:
+                evaluate(token)
 
-    if not output:
-        quirks += [('empty output', None, None)]
+        if not output:
+            quirks += [('empty output', None, None)]
 
-    def append_line(lhs, rhs, center):
-        x_offset = (lhs.box.width - rhs.box.width)//2 if center else 0
-        y_offset = -rhs.box.height
-        return lhs.concat(rhs, x_offset=x_offset, y_offset=y_offset)
+        def append_line(lhs, rhs, center):
+            x_offset = (lhs.box.width - rhs.box.width)//2 if center else 0
+            y_offset = -rhs.box.height
+            return lhs.concat(rhs, x_offset=x_offset, y_offset=y_offset)
 
-    LOG.info('quirks %s', quirks)
-    return quirks, reduce(lambda output, line: append_line(output, line, center), output, TextGroup.empty())
+        result = reduce(lambda output, line: append_line(output, line, center), output, TextGroup.empty())
+    except:
+        LOG.info('quirks %s', quirks)
+        MarkupLogHandler.get().flush()
+        raise
+    else:
+        MarkupLogHandler.get().discard()
+
+    return quirks, result
 
 if __name__ == '__main__':
     log_handler = logging.FileHandler('markup.log', encoding='utf-8')
