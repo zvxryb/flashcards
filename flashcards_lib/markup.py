@@ -37,9 +37,6 @@ class MarkupLogHandler(MemoryHandler):
         assert MarkupLogHandler.instance is None
         MarkupLogHandler.instance = self
 
-    def shouldFlush(self, record: logging.LogRecord) -> bool:
-        return False
-
     @staticmethod
     def get():
         assert MarkupLogHandler.instance
