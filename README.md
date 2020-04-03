@@ -1,3 +1,16 @@
+## Features
+
+* Lightweight, no dependencies, console UI only
+* Support for a simple markup language, including macros
+* Interactive practice mode
+  * Automatic evaluation of user's answers (equivalence normalized for case, whitespace, and unicode representation)
+  * User self-evaluation using the space key (highlight card and toggle correct/incorrect)
+* Interactive card editor
+  * Real-time preview
+  * Real-time validation of syntax (errors highlighted in red)
+* Import and export decks to JSON or CSV
+* Partial unicode support (full-width characters, etc., see below for notes)
+
 ## Usage
 
 ```
@@ -29,6 +42,20 @@ Create a session:
 Start practicing:
 
 ```python flashcards.py --db example.db start example_session```
+
+## Markup
+
+The following operations are supported:
+
+Operator                | Description
+------------------------|------------
+`\fgcolor{color}{text}` | Sets foreground color.  `color` may be any of `black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `lightgray`/`lightgrey`, `darkgray`/`darkgrey`, `brightred`, `brightyellow`, `brightblue`, `brightmagenta`, `brightcyan`, or `white`
+`\` | Escape character; treat following character as a literal, unless it's a valid function or macro name.
+`{}` | Create a group of text
+`_` | Place right-hand side text directly below left-hand side text (centered)
+`^` | Place right-hand side text directly above left-hand side text (centered)
+
+Macros are also supported and can be created using the `create macro` command.  A macro is invoked using `\macroname{arg1}{arg2}...{argn}` syntax.  A macro definition references its arguments using `#1`, `#2`, etc., starting at index 1.  Arguments will be subsituted where the corresponding reference is found.
 
 ## Notes
 
