@@ -493,6 +493,8 @@ if __name__ == '__main__':
     LOG.info('caught exception')
     try:
         sys.exit(main(sys.argv))
+    except SystemExit:
+        raise
     except:
         LOG.exception('caught exception')
         print('Caught exception (see log for details)')
