@@ -241,7 +241,7 @@ class PracticeApp:
                     char2 = getwch()
                     if char2 == MS_KEY_UP or char2 == MS_KEY_DOWN:
                         self.select_item(char2 == MS_KEY_UP)
-                elif char == ' ':
+                elif char in (' ', '\u3000'):
                     self.toggle_item()
                     self.set_selected(None)
             sys.stdout.flush()

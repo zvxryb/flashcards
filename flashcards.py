@@ -412,9 +412,9 @@ def cmd_start(db_path: str, session_name: str, round_cards: int) -> int:
             app.push_history(card_id, result, front, back, answer)
             update_card(card_id, streak, result)
             next_question()
-        elif answer.lower() in ('y', 'yes'):
+        elif normalize(answer) in ('y', 'yes'):
             start_round()
-        elif answer.lower() in ('n', 'no'):
+        elif normalize(answer) in ('n', 'no'):
             return False
         return True
 
