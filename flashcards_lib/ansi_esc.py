@@ -1,6 +1,12 @@
 def ansi_sgr(code: int) -> str:
     return f'\033[{code}m'
 
+def ansi_rgb24_fg(r: int, g: int, b: int) -> str:
+    return f'\033[38;2;{r};{g};{b}m'
+
+def ansi_rgb24_bg(r: int, g: int, b: int) -> str:
+    return f'\033[48;2;{r};{g};{b}m'
+
 ANSI_CLEAR   = '\033[H\033[J'
 ANSI_RESET   = ansi_sgr(0)
 ANSI_UP      = '\033[A'

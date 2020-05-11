@@ -382,7 +382,7 @@ class Input:
         self.formatter.redraw()
 
     def focus(self):
-        self.formatter.style = ANSI_REVERSE
+        self.formatter.style = ansi_rgb24_bg(40, 40, 40)
         self.redraw_input()
         sys.stdout.flush()
 
